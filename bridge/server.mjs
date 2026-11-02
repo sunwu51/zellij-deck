@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveZellij, bridgePaths } from './platform.mjs';
+import { preparePty } from '../scripts/prepare-pty.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import {
@@ -12,6 +13,7 @@ import {
   parseClientMessage, parseSessions, noSessions, launchArgs, terminalEnv,
 } from './protocol.mjs';
 
+await preparePty();
 const exec = promisify(execFile);
 const host = '127.0.0.1';
 const port = Number(process.env.WEBSHELL_PORT || 17329);
