@@ -110,6 +110,20 @@ When moving between Windows and macOS, clone the source, run `npm ci` and `npm r
 
 Windows native Zellij integration is tested locally. GitHub Actions runs type checks, unit tests, and builds on Windows and macOS with Node 22/24, plus a real macOS Zellij integration test using Homebrew. A configured CI job is not a passing result; check the repository's Actions tab for the actual macOS status.
 
+### macOS Unix socket path limit
+
+macOS Unix sockets have a short path limit. A long `$TMPDIR` combined with a long session name can cause Zellij to report `IPC socket path is too long`. Prefer short session names. If needed, use the same shorter socket directory in **both** your regular terminal and the bridge:
+
+```sh
+export ZELLIJ_SOCKET_DIR="/tmp/zellij-$(id -u)"
+# Use this export in every terminal that should share these sessions.
+zellij attach --create dev
+# In another terminal with the same export:
+npm run bridge
+```
+
+Changing the socket directory does not move existing sessions. Keep the existing setting when attaching to an already running session. The bridge preserves `ZELLIJ_SOCKET_DIR` and Zellij configuration variables, while clearing only nested-session identity variables.
+
 ## Security model
 
 - Binds only to `127.0.0.1`; no LAN listener, remote hosting, or arbitrary destination setting.

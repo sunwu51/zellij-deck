@@ -54,7 +54,7 @@ test('launches Zellij directly with fixed command arguments', () => {
   assert.throws(() => launchArgs({ mode: 'create', session: '--help' }));
 });
 test('bridge does not inherit nested Zellij session variables', () => {
-  const source = { PATH: '/bin', ZELLIJ: '0', ZELLIJ_SESSION_NAME: 'parent', ZELLIJ_CONFIG_FILE: 'parent.kdl' };
-  assert.deepEqual(terminalEnv(source), { PATH: '/bin', TERM: 'xterm-256color', COLORTERM: 'truecolor' });
+  const source = { PATH: '/bin', ZELLIJ: '0', ZELLIJ_SESSION_NAME: 'parent', ZELLIJ_PANE_ID: '1', ZELLIJ_CONFIG_FILE: 'parent.kdl', ZELLIJ_SOCKET_DIR: '/tmp/zj' };
+  assert.deepEqual(terminalEnv(source), { PATH: '/bin', ZELLIJ_CONFIG_FILE: 'parent.kdl', ZELLIJ_SOCKET_DIR: '/tmp/zj', TERM: 'xterm-256color', COLORTERM: 'truecolor' });
   assert.equal(source.ZELLIJ_SESSION_NAME, 'parent');
 });

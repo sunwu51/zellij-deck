@@ -74,7 +74,9 @@ export function launchArgs({ mode, session }) {
 export function terminalEnv(env = process.env) {
   const clean = { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
   for (const key of Object.keys(clean)) {
-    if (/^ZELLIJ(?:$|_)/i.test(key)) delete clean[key];
+    // Remove nesting identity, not discovery/configuration. In particular,
+    // ZELLIJ_SOCKET_DIR must match the user's other terminal clients.
+    if (/^(?:ZELLIJ|ZELLIJ_SESSION_NAME|ZELLIJ_PANE_ID)$/i.test(key)) delete clean[key];
   }
   return clean;
 }

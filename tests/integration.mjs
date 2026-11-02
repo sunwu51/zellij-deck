@@ -16,8 +16,9 @@ const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const token = 'integration-test-token-' + Date.now();
 const origin = `chrome-extension://${'a'.repeat(32)}`;
-const session = `side-shell-test-${Date.now()}`;
-const secondSession = `${session}-second`;
+// macOS TMPDIR is long and Unix domain sockets have a 103-byte path limit.
+const session = `ss-${process.pid.toString(36)}-${Date.now().toString(36).slice(-5)}`;
+const secondSession = `${session}-b`;
 const bridge = spawn(process.execPath, ['bridge/server.mjs'], {
   env: { ...process.env, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token },
   stdio: ['ignore', 'pipe', 'pipe'],
