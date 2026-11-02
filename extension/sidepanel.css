@@ -1,4 +1,12 @@
 @import './xterm.css';
+@font-face {
+  font-family:'Side Shell Symbols';
+  src:url('./fonts/nerd-fonts-v3.4.0/SymbolsNerdFontMono-Regular.ttf') format('truetype');
+  font-style:normal;
+  font-weight:100 900;
+  font-display:block;
+  unicode-range:U+E000-F8FF,U+F0000-FFFFD,U+100000-10FFFD;
+}
 :root { color-scheme: dark; --bg:#101315; --surface:#191d20; --border:#2c3236; --text:#e5e9e7; --muted:#929d9f; --accent:#a8e6be; --accent-ink:#16271c; --danger:#f2ac9e; }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
@@ -14,6 +22,9 @@ input::placeholder { color:var(--muted); }
 .primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:650; }
 .header { display:flex; align-items:center; justify-content:space-between; padding:18px 16px 16px; border-bottom:1px solid var(--border); }
 .brand { display:flex; gap:10px; align-items:center; }
+.header-actions { display:flex; gap:4px; }
+.custom-ctrl { width:44px; flex-shrink:0; text-align:center; }
+@media (max-width:340px) { .subtitle { display:none; } .header { padding:10px 12px; } .brand { gap:6px; } .header-actions { gap:2px; } .keyboard-tools .session-row { flex-wrap:wrap; } }
 .mark { font:700 20px ui-monospace,monospace; color:var(--accent); }
 h1 { font-size:16px; font-weight:650; letter-spacing:-.4px; margin:0; }
 .subtitle { font-size:8px; letter-spacing:1.35px; color:var(--muted); }
@@ -30,6 +41,15 @@ h2 { font-size:13px; margin:0; font-weight:600; }
 .checkbox input { min-height:unset; accent-color:var(--accent); }
 .hint { color:var(--muted); font-size:11px; margin:12px 0 0; }
 code { color:var(--text); font-size:11px; }
+.appearance { padding-bottom:16px; margin-bottom:16px; border-bottom:1px solid var(--border); }
+.appearance label { display:block; margin:9px 0 4px; font-size:11px; color:var(--muted); }
+.appearance textarea { display:block; width:100%; margin:8px 0; padding:8px; resize:vertical; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; font:11px/1.5 ui-monospace,monospace; }
+.appearance input[type="file"] { width:100%; margin-bottom:8px; font-size:11px; }
+#theme-preview { margin-top:10px; padding:10px; border:1px solid var(--border); border-radius:6px; font:11px/1.6 ui-monospace,monospace; }
+#theme-swatches { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:3px; margin-top:8px; }
+#theme-swatches span { height:10px; border-radius:2px; }
+#theme-feedback:empty { display:none; }
+#theme-feedback.error { color:var(--danger); }
 .session-toggle { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-shrink:0; width:100%; padding:8px 16px; border:0; border-bottom:1px solid var(--border); border-radius:0; background:var(--bg); text-align:left; }
 #session-summary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-size:12px; }
 #session-toggle-label { flex-shrink:0; font-size:10px; color:var(--muted); }

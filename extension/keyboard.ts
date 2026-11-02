@@ -11,6 +11,9 @@ export function keyAction(event: Key): KeyAction {
 }
 
 export function controlCharacter(key: string): string | null {
-  if (!/^[a-z]$/i.test(key)) return null;
-  return String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64);
+  if (!/^[a-z@\[\\\]\^_? ]$/i.test(key)) return null;
+  if (key === ' ' || key === '@') return '\x00';
+  if (key === '?') return '\x7f';
+  const code = key.toUpperCase().charCodeAt(0);
+  return code >= 65 && code <= 95 ? String.fromCharCode(code - 64) : null;
 }

@@ -10,9 +10,23 @@
 <body>
   <header class="header">
     <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Side Shell</h1><span class="subtitle">YOUR TERMINAL, ALONGSIDE</span></div></div>
-    <button id="settings-toggle" class="icon-button" aria-label="Toggle settings" aria-expanded="false" title="Settings">⚙</button>
+    <div class="header-actions"><button id="fullscreen" class="icon-button" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">⛶</button><button id="popout" class="icon-button" aria-label="Open terminal in a separate window" title="Pop out terminal">↗</button><button id="settings-toggle" class="icon-button" aria-label="Toggle settings" aria-expanded="false" title="Settings">⚙</button></div>
   </header>
   <section id="settings" class="settings" hidden aria-label="Bridge settings">
+    <section class="appearance" aria-labelledby="appearance-heading">
+      <div class="section-heading"><h2 id="appearance-heading">Terminal theme</h2><span class="badge">DEVICE LOCAL</span></div>
+      <label for="theme-preset">Preset</label>
+      <div class="session-row"><select id="theme-preset" disabled aria-describedby="theme-description"><option>Loading themes…</option></select><button id="theme-apply" disabled>Apply theme</button></div>
+      <p id="theme-description" class="hint">Mocha (Claude) maps bright blue to pink. Standard Mocha and Dracula keep their own palettes.</p>
+      <div id="theme-preview" aria-label="Terminal color preview"><div>$ <span id="theme-preview-pink">inline highlight</span> <span id="theme-preview-yellow">warning</span></div><div id="theme-swatches" aria-hidden="true"></div></div>
+      <details><summary>Import a custom palette</summary>
+        <p class="hint">Paste one Windows Terminal scheme or xterm palette object. Include background, foreground, and all 16 ANSI colors as #RRGGBB.</p>
+        <label for="theme-json" class="sr-only">Custom palette JSON</label><textarea id="theme-json" rows="5" maxlength="32768" spellcheck="false" placeholder='{"name":"My palette","background":"#1e1e2e",…}'></textarea>
+        <label for="theme-file">Or load a JSON file (max 32 KB)</label><input id="theme-file" type="file" accept=".json,application/json">
+        <button id="theme-import">Import &amp; apply</button>
+      </details>
+      <p id="theme-feedback" class="hint" role="status" aria-live="polite"></p>
+    </section>
     <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
     <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
     <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
@@ -30,7 +44,7 @@
     <details id="new-session"><summary>Create a session</summary><form id="create-form"><label class="sr-only" for="new-name">New session name</label><input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}" required><button type="submit">Create</button></form></details>
   </section>
   <section class="keyboard-tools" aria-label="Terminal keyboard tools">
-    <div class="session-row"><label for="ctrl-key">Ctrl key</label><select id="ctrl-key" disabled><option value="t">Ctrl+T</option><option value="w">Ctrl+W</option><option value="n">Ctrl+N</option><option value="p">Ctrl+P</option><option value="s">Ctrl+S</option><option value="l">Ctrl+L</option><option value="b">Ctrl+B</option><option value="v">Ctrl+V (literal)</option></select><button id="send-ctrl" disabled>Send Ctrl</button></div>
+    <div class="session-row"><label for="ctrl-key">Ctrl key</label><select id="ctrl-key" disabled><option value="t">Ctrl+T</option><option value="w">Ctrl+W</option><option value="n">Ctrl+N</option><option value="p">Ctrl+P</option><option value="s">Ctrl+S</option><option value="l">Ctrl+L</option><option value="b">Ctrl+B</option><option value="v">Ctrl+V (literal)</option><option value="custom">Custom…</option></select><input id="custom-ctrl" class="custom-ctrl" aria-label="Custom Ctrl character" title="One character: A–Z, @, [, backslash, ], ^, _, ?, or Space" placeholder="Key" maxlength="1" autocomplete="off" spellcheck="false" hidden disabled><button id="send-ctrl" disabled>Send Ctrl</button></div>
     <p id="keyboard-hint" class="hint">Paste: Ctrl+V · Copy: Ctrl+Shift+C · Send Ctrl: Ctrl+. then a letter</p>
   </section>
   </div>

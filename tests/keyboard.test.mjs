@@ -28,6 +28,12 @@ test('Ctrl+Period is the scoped send-control prefix', () => {
   assert.equal(keyAction(key('.', { ctrlKey: true, shiftKey: true })), 'default');
   assert.equal(keyAction(key('.')), 'default');
 });
+test('custom Ctrl punctuation maps to standard control bytes', () => {
+  for (const [key, byte] of [[' ', 0], ['@', 0], ['[', 27], ['\\', 28], [']', 29], ['^', 30], ['_', 31], ['?', 127]]) {
+    assert.equal(controlCharacter(key), String.fromCharCode(byte));
+  }
+  for (const key of ['ab', 'ß', '中', '0', '🎉']) assert.equal(controlCharacter(key), null);
+});
 test('send-control letters map to exact ASCII control bytes', () => {
   assert.equal(controlCharacter('t'), '\x14');
   assert.equal(controlCharacter('w'), '\x17');

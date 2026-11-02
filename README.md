@@ -53,6 +53,36 @@ A closed sidebar cannot display output or show notifications. This MVP does not 
 
 Watch mode uses the actual `zellij watch` command and also drops input at the bridge, rather than merely hiding the keyboard UI. Interactive attachment may change a shared session's layout or effective terminal dimensions; prefer **Watch** when monitoring another terminal. Existing session configuration still controls how Zellij renders itself.
 
+## Fullscreen and pop-out windows
+
+Use **⛶** in the header to toggle fullscreen. If Chrome does not permit the side panel to enter document fullscreen, Side Shell opens a dedicated fullscreen extension window instead. In a pop-out, the same button enters/exits window fullscreen and restores its previous normal/maximized state. For document fullscreen, Escape also exits; for window fullscreen use the button or the OS/Chrome fullscreen controls.
+
+Use **↗** to open a resizable standalone terminal window. When a session is connected, the new window automatically attaches to that same session with the same Watch/Interact mode; it never implicitly creates or resurrects via `--create`. Pairing credentials are read from extension storage, not placed in the URL. Without a connected session, the new window opens the session picker.
+
+The original sidebar remains connected. Each view is a separate Zellij client: both can operate in Interact mode, so avoid simultaneous typing. Closing either view detaches only that client. Different viewport sizes may affect the shared Zellij layout. Themes are loaded from the device's saved settings when a window opens; an already-open window does not live-sync theme edits made in another window.
+
+## Terminal themes and custom palettes
+
+Open **Settings (⚙) → Terminal theme**. Choose a preset, inspect the color preview, then click **Apply theme**. This updates the existing terminal without reconnecting or saving/changing bridge credentials.
+
+Presets:
+- **Catppuccin Mocha**: standard Mocha ANSI colors, including mauve magenta.
+- **Catppuccin Mocha (Claude)**: preserves the previous sidebar palette and the customized WT scheme: pink magenta and bright blue mapped to `#FF79C6`. This is the default when there is no saved preference.
+- **Dracula**: dark purple background with Dracula's pink, purple, green, and yellow ANSI palette.
+
+For a custom palette, expand **Import a custom palette**, paste a single JSON object or load a `.json` file, then click **Import & apply**. File loading alone does not apply changes. One custom palette is retained; importing another replaces it. Switching presets keeps the custom palette available. Preferences are saved in device-local extension storage, not Chrome Sync. There is no automatic inheritance from WT/iTerm.
+
+Import requirements:
+- Maximum 32 KB; strict JSON, no comments or trailing commas.
+- Required: `background`, `foreground`, and all 16 ANSI colors, each as `#RRGGBB`.
+- Windows Terminal `purple` / `brightPurple` / `cursorColor` map to xterm `magenta` / `brightMagenta` / `cursor`.
+- Optional: `name`, `cursor` or `cursorColor`, `selectionBackground`. Cursor defaults to foreground; selection defaults to bright black.
+- Copy **one object** from WT's `schemes` array, not the full settings file. Unknown fields are ignored. Invalid palettes leave the active theme unchanged.
+
+See [examples/dracula-windows-terminal.json](examples/dracula-windows-terminal.json) for a complete importable example. Import is entirely local; files are not uploaded to the bridge or a remote service. ANSI colors respond to palette changes; applications emitting explicit 24-bit RGB colors still choose those exact colors themselves. Bold text does not automatically select a different ANSI palette slot.
+
+The extension also bundles a licensed Nerd Font symbols fallback for Powerline separators; no OS font installation or remote font request is required.
+
 ## Keyboard shortcuts and clipboard
 
 Click the terminal and use **Interact** mode to send keyboard input. Watch mode never sends input.
@@ -66,6 +96,8 @@ Click the terminal and use **Interact** mode to send keyboard input. Watch mode 
 | Send Ctrl+T to Zellij | **Ctrl+.**, then **T**, or choose **Ctrl+T** and click **Send Ctrl** |
 | Cancel a pending Ctrl prefix | **Escape**, focus outside the terminal, or wait five seconds |
 | Send literal Ctrl+V rather than paste | **Ctrl+.**, then **V**, or choose **Ctrl+V (literal)** and click **Send Ctrl** |
+
+In the **Ctrl key** dropdown, choose **Custom…**, enter one character, then click **Send Ctrl** or press Enter. Letters A–Z are case-insensitive. Standard punctuation mappings are also supported: Ctrl+Space / Ctrl+@ (NUL), Ctrl+[ (Escape), Ctrl+backslash, Ctrl+], Ctrl+^, Ctrl+_, and Ctrl+? (DEL). Other characters are rejected because they do not have a standard single-byte terminal Ctrl encoding. These controls are disabled outside a connected Interact session. Ctrl+S/Ctrl+Q can affect shell flow control depending on the shell's terminal configuration.
 
 The prefix is scoped to the focused xterm terminal; settings fields keep normal editing behavior. It maps A–Z to standard terminal control bytes. It is not a global shortcut remapping and does not change Zellij's configuration. The toolbar returns focus to the terminal after sending a key, so subsequent Zellij mode keys can be typed normally.
 

@@ -1,6 +1,9 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { keyAction, controlCharacter } from './keyboard';
+import { terminalColorOptions } from './theme';
+import { initThemeControls } from './theme-controls';
+import { initWindowControls, windowTarget } from './window-controls';
 
 type Settings = { port: number; token: string; fontSize: number; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
 type Session = { name: string; exited: boolean; current: boolean };
@@ -28,17 +31,30 @@ let ready = false;
 let outputPending = 0;
 let refreshController: AbortController | undefined;
 
+// Powerline/Nerd Font glyphs live in Unicode's private-use ranges. Load the
+// packaged fallback before xterm measures or draws its first terminal cells.
+let symbolFontFailed = false;
+try {
+  const faces = await document.fonts.load('13px "Side Shell Symbols"', '');
+  symbolFontFailed = faces.length === 0;
+} catch { symbolFontFailed = true; }
+
 const terminal = new Terminal({
   cursorBlink: true, fontSize: 13,
-  fontFamily: 'Cascadia Code, Consolas, Menlo, monospace',
+  fontFamily: '"Side Shell Symbols", "Cascadia Code", Consolas, Menlo, monospace',
   scrollback: 5000, allowProposedApi: false, allowTransparency: false,
   disableStdin: true,
-  theme: { background: '#101315', foreground: '#e5e9e7', cursor: '#a8e6be', selectionBackground: '#3b5548', black: '#242a2d', red: '#e99d91', green: '#a8e6be', yellow: '#e8d49b', blue: '#93bbdf', magenta: '#c6a8dd', cyan: '#92cdd0', white: '#e5e9e7' },
+  ...terminalColorOptions,
 });
 const fit = new FitAddon();
 terminal.loadAddon(fit);
 terminal.open(element('terminal'));
-function showNotice(message = '') { notice.textContent = message; notice.hidden = !message; }
+function showNotice(message = '') {
+  const text = message || (symbolFontFailed ? 'Terminal symbol font could not load. Rebuild and reload the extension to restore Powerline icons.' : '');
+  notice.textContent = text;
+  notice.hidden = !text;
+}
+showNotice();
 function status(text: string, state = '') {
   element('status').textContent = text;
   element('status-dot').className = `status-dot ${state}`;
@@ -111,6 +127,7 @@ function clearCtrlPrefix() {
 function updateKeyboardControls() {
   element<HTMLSelectElement>('ctrl-key').disabled = !canInput();
   element<HTMLButtonElement>('send-ctrl').disabled = !canInput();
+  element<HTMLInputElement>('custom-ctrl').disabled = !canInput();
 }
 terminal.attachCustomKeyEventHandler(event => {
   if (ctrlPending) {
@@ -155,11 +172,29 @@ terminal.attachCustomKeyEventHandler(event => {
   return true;
 });
 terminal.textarea?.addEventListener('blur', clearCtrlPrefix);
-element('send-ctrl').addEventListener('click', () => {
-  const data = controlCharacter(element<HTMLSelectElement>('ctrl-key').value);
-  if (data !== null) sendInput(data);
-  terminal.focus();
+element('ctrl-key').addEventListener('change', () => {
+  const custom = element<HTMLInputElement>('custom-ctrl');
+  custom.hidden = element<HTMLSelectElement>('ctrl-key').value !== 'custom';
+  if (!custom.hidden) custom.focus();
 });
+function sendSelectedCtrl() {
+  if (!canInput()) return;
+  const selected = element<HTMLSelectElement>('ctrl-key').value;
+  const custom = element<HTMLInputElement>('custom-ctrl');
+  const data = controlCharacter(selected === 'custom' ? custom.value : selected);
+  if (data === null) {
+    showNotice('Enter one Ctrl character: A–Z, @, [, backslash, ], ^, _, ?, or Space. Other characters have no standard terminal Ctrl byte.');
+    custom.focus();
+    return;
+  }
+  sendInput(data);
+  terminal.focus();
+}
+element('send-ctrl').addEventListener('click', sendSelectedCtrl);
+element('custom-ctrl').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); sendSelectedCtrl(); }
+});
+initWindowControls(() => ready ? target : undefined, showNotice, resize);
 
 function baseUrl() { return `http://127.0.0.1:${settings.port}`; }
 async function refreshSessions(quiet = false) {
@@ -347,6 +382,7 @@ element('save-settings').addEventListener('click', async () => {
 });
 window.addEventListener('pagehide', detach);
 async function init() {
+  await initThemeControls(terminal);
   try {
     const stored = await chrome.storage.local.get('settings');
     if (stored.settings && typeof stored.settings === 'object') {
@@ -360,7 +396,15 @@ async function init() {
   terminal.options.fontSize = settings.fontSize;
   setMode(settings.mode);
   resize();
+  const requested = windowTarget(location.hash);
+  if (requested) {
+    settings.session = requested.session;
+    setMode(requested.mode === 'watch' ? 'watch' : 'attach');
+  }
   if (!settings.token) setSettingsOpen(true);
-  else await refreshSessions();
+  else {
+    await refreshSessions();
+    if (requested) connect(requested);
+  }
 }
 void init();
