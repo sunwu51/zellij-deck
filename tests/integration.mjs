@@ -26,6 +26,7 @@ let logs = '';
 bridge.stdout.on('data', data => { logs += data.toString(); });
 bridge.stderr.on('data', data => { logs += data.toString(); });
 const sockets = [];
+const terminalOutputs = new Map();
 const deadline = setTimeout(() => { console.error('Integration test deadline exceeded.'); bridge.kill(); process.exitCode = 1; }, 45000);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function waitFor(check, label, timeout = 12000) {
@@ -56,6 +57,7 @@ async function connect(mode, sessionName = session) {
     if (message.type === 'error') failure = message.message;
     if (message.type === 'output') {
       output += message.data;
+      terminalOutputs.set(sessionName, output.slice(-16000));
       // Simulate xterm's terminal capability responses for the headless smoke test.
       let response = '';
       if (message.data.includes('\x1b[6n')) response += '\x1b[1;1R';
@@ -116,6 +118,15 @@ try {
   assert.equal(watcher.failure(), '');
   assert.equal(watcher.output().includes('SHOULD_NOT_RUN'), false, 'Read-only input must not reach the terminal');
   console.log('PASS: Read-only watcher reconnects, receives output, and drops input');
+} catch (error) {
+  for (const [name, output] of terminalOutputs) console.error(`Terminal output (${name}): ${JSON.stringify(output)}`);
+  try {
+    const listing = await exec(executable, ['list-sessions', '--no-formatting'], { env: terminalEnv(), timeout: 5000 });
+    console.error('Raw Zellij listing:', JSON.stringify(listing.stdout), JSON.stringify(listing.stderr));
+  } catch (listingError) {
+    console.error('Raw Zellij listing error:', JSON.stringify(listingError.stdout), JSON.stringify(listingError.stderr));
+  }
+  throw error;
 } finally {
   clearTimeout(deadline);
   for (const ws of sockets) ws.terminate();
