@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Side Shell</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Side Shell</h1><span class="subtitle">YOUR TERMINAL, ALONGSIDE</span></div></div>
+    <button id="settings-toggle" class="icon-button" aria-label="Toggle settings" aria-expanded="false" title="Settings">⚙</button>
+  </header>
+  <section id="settings" class="settings" hidden aria-label="Bridge settings">
+    <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
+    <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
+    <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
+    <div class="settings-row"><label for="font-size">Font size</label><input id="font-size" type="number" min="10" max="24" value="13"></div>
+    <label class="checkbox"><input id="auto-reconnect" type="checkbox" checked> Reconnect after a connection loss</label>
+    <button id="save-settings" class="primary">Save &amp; connect bridge</button>
+    <p class="hint">Start the local bridge with <code>npm run bridge</code>. Your token is saved on this device, not synced.</p>
+  </section>
+  <button id="session-toggle" class="session-toggle" aria-expanded="true" aria-controls="session-controls"><span id="session-summary">Session controls</span><span id="session-toggle-label">Collapse ▴</span></button>
+  <div id="session-controls">
+  <section class="controls" aria-label="Session controls">
+    <div class="session-row"><label class="sr-only" for="session">Zellij session</label><select id="session"><option value="">Choose a session</option></select><button id="refresh" class="icon-button" title="Refresh sessions" aria-label="Refresh sessions">↻</button></div>
+    <p id="session-help" class="hint">First connect the bridge in settings. Then choose a persistent Zellij workspace here.</p>
+    <div class="mode-row"><div class="segmented" role="group" aria-label="Connection mode"><button id="watch" class="selected" aria-pressed="true">Watch</button><button id="attach" aria-pressed="false">Interact</button></div><button id="connect" class="primary">Open session</button><button id="disconnect" hidden>Detach</button></div>
+    <details id="new-session"><summary>Create a session</summary><form id="create-form"><label class="sr-only" for="new-name">New session name</label><input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}" required><button type="submit">Create</button></form></details>
+  </section>
+  <section class="keyboard-tools" aria-label="Terminal keyboard tools">
+    <div class="session-row"><label for="ctrl-key">Ctrl key</label><select id="ctrl-key" disabled><option value="t">Ctrl+T</option><option value="w">Ctrl+W</option><option value="n">Ctrl+N</option><option value="p">Ctrl+P</option><option value="s">Ctrl+S</option><option value="l">Ctrl+L</option><option value="b">Ctrl+B</option><option value="v">Ctrl+V (literal)</option></select><button id="send-ctrl" disabled>Send Ctrl</button></div>
+    <p id="keyboard-hint" class="hint">Paste: Ctrl+V · Copy: Ctrl+Shift+C · Send Ctrl: Ctrl+. then a letter</p>
+  </section>
+  </div>
+  <main id="terminal-region">
+    <div id="terminal" aria-label="Zellij terminal"></div>
+    <div id="empty-state"><span class="empty-symbol" aria-hidden="true">[ &gt;_ ]</span><h2>A little room for your shell.</h2><p>Follow builds, logs, and long-running tasks<br>without leaving the page.</p><span class="empty-note">WATCH BY DEFAULT · INTERACT WHEN NEEDED</span></div>
+  </main>
+  <div id="notice" role="status" hidden></div>
+  <footer><span class="status-group"><span id="status-dot" class="status-dot"></span><span id="status" role="status">Not connected</span></span><span id="dimensions">— × —</span></footer>
+  <script src="sidepanel.js" type="module"></script>
+</body>
+</html>
