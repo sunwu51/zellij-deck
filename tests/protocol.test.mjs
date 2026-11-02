@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validToken, isExtensionOrigin, validSession, dimensions, parseSessions,
-  parseClientMessage, launchArgs, terminalEnv,
+  parseClientMessage, launchArgs, terminalEnv, noSessions,
 } from '../bridge/protocol.mjs';
 
 test('token authentication rejects missing and wrong credentials', () => {
@@ -24,6 +24,14 @@ test('session names cannot become flags or paths', () => {
 test('resize dimensions have bounded integer sizes', () => {
   assert.deepEqual(dimensions(80, 24), { cols: 80, rows: 24 });
   for (const pair of [[0, 24], [80, 1], [501, 24], [80, 301], [80.5, 24], ['80', 24]]) assert.equal(dimensions(...pair), null);
+});
+test('fresh installations report no sessions across Zellij output variants', () => {
+  for (const text of ['No sessions found.', 'No active sessions found.', 'No Zellij sessions found.', '\x1b[31mNo active Zellij sessions found.\x1b[0m']) {
+    assert.equal(noSessions({ stderr: text }), true);
+    assert.equal(noSessions({ stdout: text }), true);
+  }
+  assert.equal(noSessions({ stderr: 'Permission denied' }), false);
+  assert.equal(noSessions({ stderr: 'Failed to read sessions' }), false);
 });
 test('session listing preserves active and exited state', () => {
   assert.deepEqual(parseSessions('\x1b[32mdev\x1b[0m [Created 1h ago] (current)\r\nold [Created 2h ago] (EXITED - attach to resurrect)\nnoise\n'), [

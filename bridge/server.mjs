@@ -9,7 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import {
   MAX_MESSAGE_BYTES, MAX_BUFFER_BYTES, validToken, isExtensionOrigin,
-  parseClientMessage, parseSessions, launchArgs, terminalEnv,
+  parseClientMessage, parseSessions, noSessions, launchArgs, terminalEnv,
 } from './protocol.mjs';
 
 const exec = promisify(execFile);
@@ -79,7 +79,8 @@ const server = http.createServer(async (req, res) => {
       const result = await exec(executable, ['list-sessions', '--no-formatting'], { env, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
       return json(res, 200, { sessions: parseSessions(result.stdout) });
     } catch (error) {
-      if (/no (active )?sessions/i.test(`${error.stdout || ''}\n${error.stderr || ''}`)) return json(res, 200, { sessions: [] });
+      if (noSessions(error)) return json(res, 200, { sessions: [] });
+      console.error('Zellij session listing failed:', error.stderr || error.stdout || error.message);
       return json(res, 500, { error: 'Could not list Zellij sessions. Check the bridge terminal.' });
     }
   }

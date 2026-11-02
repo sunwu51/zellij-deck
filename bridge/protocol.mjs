@@ -24,6 +24,11 @@ export function dimensions(cols, rows) {
   return { cols, rows };
 }
 
+export function noSessions(error) {
+  const output = `${error.stdout || ''}\n${error.stderr || ''}`.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  return /\bno (?:active )?(?:zellij )?sessions(?:\b|$)/i.test(output);
+}
+
 export function parseSessions(output) {
   return output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').split(/\r?\n/)
     .map(line => {
