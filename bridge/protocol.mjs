@@ -80,3 +80,108 @@ export function terminalEnv(env = process.env) {
   }
   return clean;
 }
+
+// ---- Session snapshots -------------------------------------------------------
+// Snapshots use Zellij's query actions (list-tabs, list-panes, dump-screen), so
+// previewing never attaches a client or changes a session's size, focus, or tab.
+export const MAX_SNAPSHOT_PANES = 48;
+export const MAX_PANE_DUMP_CHARS = 256 * 1024;
+
+/** Returns the session for /sessions/<name>/snapshot, false for an invalid name, or null for other routes. */
+export function snapshotRoute(url) {
+  const match = /^\/sessions\/([^/?#]+)\/snapshot$/.exec(url || '');
+  if (!match) return null;
+  let name;
+  try { name = decodeURIComponent(match[1]); } catch { return false; }
+  return validSession(name) ? name : false;
+}
+
+export function snapshotArgs(session, action) {
+  if (!validSession(session)) throw new Error('Invalid session name.');
+  return ['--session', session, 'action', ...action];
+}
+
+function cleanText(value, max = 120) {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, max) : '';
+}
+function count(value, max = 10000) {
+  return Number.isInteger(value) && value >= 0 && value <= max ? value : null;
+}
+
+/** Keep only printable text, newlines, tabs, and SGR color/style sequences. */
+export function sanitizeDump(text) {
+  let clean = String(text).replace(/\r\n?/g, '\n')
+    // Drop every escape sequence except SGR (ESC [ ... m), including OSC/DCS strings.
+    .replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[PX^_][^\x1b]*(?:\x1b\\)?|[\s\S]?)/g,
+      sequence => /^\x1b\[[0-9;:]*m$/.test(sequence) ? sequence : '')
+    .replace(/[\u0000-\u0008\u000b-\u001a\u001c-\u001f\u007f-\u009f]/g, '')
+    .replace(/\n+$/, '');
+  let truncated = false;
+  if (clean.length > MAX_PANE_DUMP_CHARS) {
+    // Keep the bottom of the viewport, starting at a line boundary.
+    const start = clean.indexOf('\n', clean.length - MAX_PANE_DUMP_CHARS);
+    clean = start === -1 ? '' : clean.slice(start + 1);
+    truncated = true;
+  }
+  return { content: clean, truncated };
+}
+
+/** Normalize `list-tabs --json --all` and `list-panes --json --all` into a bounded preview layout. */
+export function snapshotLayout(tabsJson, panesJson) {
+  if (!Array.isArray(tabsJson) || !Array.isArray(panesJson)) throw new Error('Unexpected Zellij layout output.');
+  const tabs = tabsJson.flatMap(tab => {
+    const id = count(tab?.tab_id);
+    const cols = count(tab?.display_area_columns, 2000);
+    const rows = count(tab?.display_area_rows, 1000);
+    if (id === null || !cols || !rows) return [];
+    return [{
+      id, position: count(tab.position) ?? 0, name: cleanText(tab.name, 64) || `Tab ${id + 1}`,
+      active: tab.active === true, cols, rows,
+      floatingVisible: tab.are_floating_panes_visible === true,
+      fullscreen: tab.is_fullscreen_active === true,
+      bell: tab.has_bell_notification === true,
+    }];
+  }).sort((a, b) => a.position - b.position);
+  const tabIds = new Set(tabs.map(tab => tab.id));
+  const activeTab = tabs.find(tab => tab.active)?.id;
+  const panes = panesJson.flatMap(pane => {
+    const id = count(pane?.id);
+    const tabId = count(pane?.tab_id);
+    const geometry = {
+      x: count(pane?.pane_x), y: count(pane?.pane_y), cols: count(pane?.pane_columns), rows: count(pane?.pane_rows),
+      contentX: count(pane?.pane_content_x), contentY: count(pane?.pane_content_y),
+      contentCols: count(pane?.pane_content_columns), contentRows: count(pane?.pane_content_rows),
+    };
+    if (id === null || !tabIds.has(tabId) || pane.is_suppressed === true || Object.values(geometry).some(value => value === null)) return [];
+    if (!geometry.cols || !geometry.rows) return [];
+    const plugin = pane.is_plugin === true;
+    return [{
+      id: `${plugin ? 'plugin' : 'terminal'}_${id}`, tabId, plugin,
+      title: cleanText(pane.title) || (plugin ? cleanText(pane.plugin_url) : ''),
+      focused: pane.is_focused === true, floating: pane.is_floating === true,
+      fullscreen: pane.is_fullscreen === true, exited: pane.exited === true,
+      ...geometry,
+    }];
+  });
+  // Under the cap, prefer the active tab, then terminal panes (plugins have no dumpable text).
+  const ranked = panes.map((pane, index) => ({ pane, index }))
+    .sort((a, b) => Number(b.pane.tabId === activeTab) - Number(a.pane.tabId === activeTab)
+      || Number(a.pane.plugin) - Number(b.pane.plugin) || a.index - b.index);
+  const kept = new Set(ranked.slice(0, MAX_SNAPSHOT_PANES).map(item => item.pane));
+  // Every attached client has exactly one focused tab, so the union is the attached-client set.
+  // A session with zero clients is still running in the background (detached).
+  const clients = new Set(tabsJson.flatMap(tab => Array.isArray(tab?.other_focused_clients) ? tab.other_focused_clients.filter(id => count(id) !== null) : []));
+  return { tabs, panes: panes.filter(pane => kept.has(pane)), panesTruncated: panes.length > MAX_SNAPSHOT_PANES, clients: clients.size };
+}
+
+/** Classify a failed snapshot query into an HTTP status and a user-facing message. */
+export function snapshotFailure(error) {
+  const output = `${error?.stdout || ''}\n${error?.stderr || ''}`.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (/session '.*' not found|no (?:active )?(?:zellij )?sessions?/i.test(output)) {
+    return { status: 404, error: 'Session is not running. Exited sessions have no live screen to preview.' };
+  }
+  if (/unrecognized subcommand|unexpected argument|Found argument/i.test(output)) {
+    return { status: 501, error: 'This Zellij version cannot report tabs and panes. Upgrade Zellij to use session previews.' };
+  }
+  return { status: 500, error: 'Could not capture the session preview. Check the bridge terminal.' };
+}

@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { keyAction, controlCharacter } from './keyboard';
 import { terminalColorOptions } from './theme';
 import { initThemeControls } from './theme-controls';
-import { initWindowControls, windowTarget } from './window-controls';
+import { initWindowControls, openDashboard, windowTarget } from './window-controls';
 
 type Settings = { port: number; token: string; fontSize: number; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
 type Session = { name: string; exited: boolean; current: boolean };
@@ -195,6 +195,9 @@ element('custom-ctrl').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); sendSelectedCtrl(); }
 });
 initWindowControls(() => ready ? target : undefined, showNotice, resize);
+element('dashboard').addEventListener('click', () => {
+  void openDashboard().catch(error => showNotice(error instanceof Error ? error.message : 'Could not open session previews.'));
+});
 
 function baseUrl() { return `http://127.0.0.1:${settings.port}`; }
 async function refreshSessions(quiet = false) {

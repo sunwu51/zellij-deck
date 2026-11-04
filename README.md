@@ -61,6 +61,54 @@ Use **↗** to open a resizable standalone terminal window. When a session is co
 
 The original sidebar remains connected. Each view is a separate Zellij client: both can operate in Interact mode, so avoid simultaneous typing. Closing either view detaches only that client. Different viewport sizes may affect the shared Zellij layout. Themes are loaded from the device's saved settings when a window opens; an already-open window does not live-sync theme edits made in another window.
 
+## Session previews
+
+Click **▦** in the side-panel header to open **Session previews** in a browser tab. If it is already open, that tab is focused. Like a browser automation dashboard, it shows a live thumbnail for every running Zellij session at once:
+
+- Each card renders the session's active tab as Zellij would show it: pane positions, frames, focused-pane highlight, visible floating panes, and ANSI/24-bit colors in your saved terminal theme.
+- Click a tab chip to preview another tab of that session. Click the thumbnail for a large view of the whole tab; Escape closes it.
+- **Watch** / **Interact** open that session in a pop-out terminal window. Exited sessions are listed separately and can be resurrected with Interact.
+- Auto-refresh defaults to every 5 seconds (off, 2s, 5s, or 15s). It pauses while the tab is hidden.
+
+Previews are strictly read-only and do not attach a Zellij client. The bridge reads layout with `zellij action list-tabs --json` / `list-panes --json` and screen text with `dump-screen --pane-id --ansi`, so capturing never changes a session's size, focus, or active tab. Before pane text leaves the bridge, it is reduced to printable text plus SGR color/style codes. At most six Zellij query processes run at once, and at most 48 panes are captured per session. Plugin panes (status bar, tab bar, sidebars) have no screen text to dump and appear as labeled placeholders. A session with no attached client is marked **DETACHED**: it is still running in the background (Zellij keeps its server process alive after the last client leaves), but no terminal window shows it. Such a session reports no active tab, so the first tab is shown. If the dashboard says the bridge is out of date, stop the bridge and run `npm run bridge` again; a bridge started before this feature cannot capture previews. Previews require a Zellij version with these actions (verified with 0.45.1); older versions show an upgrade message on the card.
+
+## MCP server for AI agents
+
+The bridge also serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so agents (TabManager, Claude Code, Codex, any MCP client) can open terminals, type into them, read their output, and run commands:
+
+```text
+http://127.0.0.1:17329/mcp        Authorization: Bearer <pairing token>
+```
+
+Claude Code example: `claude mcp add --transport http side-shell http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; the sidebar and dashboard use the same token.
+
+### Isolation: one MCP session, one Zellij session
+
+The standard `Mcp-Session-Id` is the identity. `initialize` issues a session id, and **the Zellij session and every job an MCP session creates belong to it**. Other MCP sessions cannot list, read, type into, close, or adopt its panes (they get "not found", which does not reveal that they exist), and your own sessions opened in the side panel are invisible to agents. The id travels in an HTTP header managed by the client, so a model cannot forge another conversation's identity. TabManager gives every conversation its own MCP session; most other clients use one per process.
+
+This prevents accidental cross-talk. It is not an OS-level boundary: every shell runs as you, so a command inside one agent terminal could still run `zellij kill-session` on another.
+
+### Lifetime and cleanup
+
+An MCP session lasts 24 hours from its last request (every request renews it; change with `WEBSHELL_MCP_TTL_HOURS`, 1–720). A client that never sends `DELETE` therefore cannot leak terminals: once a session is idle past the TTL, the bridge kills its Zellij sessions and jobs. `DELETE /mcp` with the session header ends it immediately. A bridge restart keeps sessions (`.bridge/mcp-sessions.json`, which stores no token) and grants a one-hour grace period, so downtime alone does not expire them. Rotating the pairing token invalidates old ids; their terminals are cleaned up one TTL later. A client that resumes with a new session id (for example `claude --resume`) can take over an abandoned terminal with `session_adopt` once its previous owner has been idle for two hours.
+
+### Tools
+
+There are no sessions, tabs, or layouts for an agent to manage. Your MCP session owns **one private Zellij session**, created by your first `pane_open`, and every pane lives in **its own full-size tab** (opened without moving focus), so agents never juggle splits and TUIs are never squeezed by neighbors. A pane is addressed by its id (`terminal_3`); with exactly one pane open it can be omitted.
+
+| Group | Tools |
+| --- | --- |
+| Panes | `pane_open` (always a shell; optional `command` is typed into it and run, optional `name`, `cwd`). When a command finishes the pane is simply back at its prompt and stays usable. If the shell itself exits (for example you typed `exit`), Zellij closes the pane and its tab, `pane_list` (panes and your exec jobs), `pane_close` (closing the last pane ends your session; the next `pane_open` starts a new one) |
+| Input | `pane_type` (literal text, optional Enter, bracketed paste for multiple lines), `pane_keys` (`Enter`, `Esc`, `Up`/`Down`, `Ctrl c`, `F5`, ...), `pane_mouse` (click, double/right click, wheel scroll at a row and column; only for programs that enabled mouse tracking). Each returns `offset`, the pane's line count just before the input |
+| Output | `pane_read` (plain-text lines by `tail`, or `offset`/`limit`, with `total_lines`/`next_offset`; optional regex `pattern`), `pane_screen` (what the pane shows now, plus the cursor) |
+| Waiting | `pane_wait` until a pattern appears or output goes idle; always returns within 45 s, or earlier with `closed` if the pane is closed meanwhile (later calls say the pane "was closed" rather than "not found") |
+| Commands | `exec` (separate stdout/stderr, exit code, working directory, stdin; continues as a background job past its timeout), `job_output` (paged by line), `job_wait`, `job_kill` |
+| Session | `session_kill` (end all your panes; the next `pane_open` starts fresh), `session_adopt` (take over an abandoned session after resuming a conversation) |
+
+Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the side panel; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. A job (`exec`) is a process the bridge starts itself, outside any pane, which is why it has separate stdout/stderr; commands typed into a pane have no job id.
+
+To let TabManager connect, add its extension ID to `WEBSHELL_EXTENSION_ID` (comma-separated) if you pin origins. Native clients send no `Origin`; browser requests with any other origin are rejected, so web pages cannot reach the endpoint.
+
 ## Terminal themes and custom palettes
 
 Open **Settings (⚙) → Terminal theme**. Choose a preset, inspect the color preview, then click **Apply theme**. This updates the existing terminal without reconnecting or saving/changing bridge credentials.
@@ -115,7 +163,8 @@ Optional bridge environment variables:
 | `ZELLIJ_PATH` | Zellij on PATH | Absolute executable path if discovery fails. |
 | `WEBSHELL_CWD` | Your home directory | Working directory for Zellij clients/new sessions. |
 | `WEBSHELL_STATE_DIR` | This project's `.bridge` directory | Optional location for the pairing token. |
-| `WEBSHELL_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to one installed extension ID. Recommended for a hardened local setup. |
+| `WEBSHELL_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to specific installed extension IDs (comma-separated, e.g. Side Shell and TabManager). Recommended for a hardened local setup. |
+| `WEBSHELL_MCP_TTL_HOURS` | `24` | Idle lifetime of an MCP session before its terminals are cleaned up (1–720). |
 | `WEBSHELL_TOKEN` | Generated random token | Override the pairing token. Use 32–256 letters, numbers, underscores, or hyphens. |
 
 Example:
@@ -163,7 +212,7 @@ Changing the socket directory does not move existing sessions. Keep the existing
 - Requires the pairing token for session listing and WebSocket upgrades.
 - Sends the WebSocket token as a subprotocol, not in a URL. Traffic is unencrypted loopback traffic; local debugging tools and privileged local software can inspect it.
 - Supports optional pinning to a single extension ID.
-- Spawns only Zellij with validated, separate arguments; no command-string interpolation or arbitrary executable API.
+- Spawns only Zellij with validated, separate arguments; no command-string interpolation or arbitrary executable API. Session previews use only Zellij's read-only query actions.
 - Enforces message/resize/output buffer bounds and limits concurrent WebSocket clients.
 - Does not inject content scripts, read pages, capture browser history, or load scripts from a CDN.
 - Bundles xterm.js locally to comply with Manifest V3's remote-code restrictions.
@@ -186,8 +235,8 @@ After source changes, rebuild and click **Reload** for the extension in `chrome:
 Project layout:
 
 ```text
-extension/          Manifest V3 side panel, xterm.js UI, service worker
-bridge/             Authenticated localhost HTTP/WebSocket to PTY bridge
+extension/          Manifest V3 side panel, xterm.js UI, session-preview dashboard, service worker
+bridge/             Authenticated localhost HTTP/WebSocket to PTY bridge, plus bridge/mcp/ (MCP server)
 scripts/build.mjs   Local extension bundling
 tests/              Protocol unit tests and native Zellij integration smoke test
 dist/               Generated unpacked extension (load this folder)

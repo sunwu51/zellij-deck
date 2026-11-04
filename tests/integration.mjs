@@ -3,6 +3,9 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import net from 'node:net';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { WebSocket } from 'ws';
 import { terminalEnv } from '../bridge/protocol.mjs';
 import { resolveZellij } from '../bridge/platform.mjs';
@@ -19,8 +22,10 @@ const origin = `chrome-extension://${'a'.repeat(32)}`;
 // macOS TMPDIR is long and Unix domain sockets have a 103-byte path limit.
 const session = `ss-${process.pid.toString(36)}-${Date.now().toString(36).slice(-5)}`;
 const secondSession = `${session}-b`;
+// Never share the real .bridge state (MCP session ownership) with a test bridge.
+const stateDir = await mkdtemp(path.join(tmpdir(), 'side-shell-it-'));
 const bridge = spawn(process.execPath, ['bridge/server.mjs'], {
-  env: { ...process.env, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token },
+  env: { ...process.env, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token, WEBSHELL_STATE_DIR: stateDir },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let logs = '';
@@ -111,6 +116,22 @@ try {
   assert.ok(sessions.some(s => s.name === session && !s.exited));
   assert.ok(sessions.some(s => s.name === secondSession && !s.exited));
   console.log('PASS: Two separately created sessions remain discoverable and running after detach');
+  const auth = { Authorization: `Bearer ${token}` };
+  assert.equal((await request(`/sessions/${session}/snapshot`)).status, 401);
+  assert.equal((await request('/sessions/--help/snapshot', auth)).status, 400);
+  const snapshotResponse = await request(`/sessions/${session}/snapshot`, auth);
+  if (snapshotResponse.status === 501) console.log('SKIP: This Zellij version cannot report tabs/panes for session previews');
+  else {
+    assert.equal(snapshotResponse.status, 200);
+    const snapshot = await snapshotResponse.json();
+    assert.equal(snapshot.session, session);
+    // A session with no attached client reports no active tab; previews fall back to the first.
+    assert.ok(snapshot.tabs.length >= 1);
+    assert.ok(snapshot.panes.some(pane => !pane.plugin && typeof pane.content === 'string'), 'A terminal pane must be dumped');
+    assert.equal((await request(`/sessions/${session}-missing/snapshot`, auth)).status, 404);
+    assert.ok((await listSessions()).some(s => s.name === session && !s.exited), 'Snapshots must not disturb the session');
+    console.log(`PASS: Session preview captured ${snapshot.tabs.length} tab(s) and ${snapshot.panes.length} pane(s) without attaching`);
+  }
   const watcher = await connect('watch');
   await waitFor(() => watcher.output().length > 50, 'watcher produces terminal output', 18000);
   watcher.ws.send(JSON.stringify({ type: 'input', data: 'echo SHOULD_NOT_RUN\r' }));
@@ -135,4 +156,6 @@ try {
     try { await exec(executable, ['kill-session', name], { env: terminalEnv(), timeout: 5000 }); } catch {}
   }
   bridge.kill();
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await rm(stateDir, { recursive: true, force: true });
 }
