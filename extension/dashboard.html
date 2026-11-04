@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Session Previews · Side Shell</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Session previews</h1><span class="subtitle">EVERY ZELLIJ SESSION AT A GLANCE · READ-ONLY</span></div></div>
+    <div class="toolbar">
+      <label class="sr-only" for="filter">Filter sessions</label><input id="filter" type="search" placeholder="Filter sessions" autocomplete="off" spellcheck="false">
+      <label class="sr-only" for="interval">Auto-refresh</label>
+      <select id="interval" title="Auto-refresh interval"><option value="0">Auto-refresh off</option><option value="2000">Every 2s</option><option value="5000" selected>Every 5s</option><option value="15000">Every 15s</option></select>
+      <button id="refresh" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button>
+    </div>
+  </header>
+  <div id="notice" role="status" hidden></div>
+  <main>
+    <div id="empty" class="empty" hidden></div>
+    <section id="grid" class="grid" aria-label="Running sessions"></section>
+    <details id="exited" hidden><summary id="exited-summary">Exited sessions</summary>
+      <p class="hint">Exited sessions have no live screen. Opening one in Interact mode resurrects it.</p>
+      <ul id="exited-list"></ul>
+    </details>
+  </main>
+  <footer><span class="status-group"><span id="status-dot" class="status-dot"></span><span id="status">Loading…</span></span><span id="updated"></span></footer>
+  <dialog id="focus" aria-labelledby="focus-title">
+    <div class="focus-header">
+      <h2 id="focus-title"></h2>
+      <div class="tabs" id="focus-tabs" role="group" aria-label="Tabs"></div>
+      <div class="focus-actions"><button data-mode="watch">Watch</button><button data-mode="attach">Interact</button><button id="focus-close" class="icon-button" autofocus aria-label="Close preview" title="Close (Esc)">✕</button></div>
+    </div>
+    <div class="focus-body"><canvas id="focus-canvas" role="img"></canvas></div>
+    <p id="focus-meta" class="hint"></p>
+  </dialog>
+  <script src="dashboard.js" type="module"></script>
+</body>
+</html>

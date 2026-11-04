@@ -74,3 +74,15 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
   window.addEventListener('resize', () => { void updateLabel(); });
   void updateLabel();
 }
+
+/** Focus the existing session-previews tab, or open one. */
+export async function openDashboard() {
+  const url = chrome.runtime.getURL('dashboard.html');
+  const [existing] = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB], documentUrls: [url] });
+  if (existing?.tabId !== undefined && existing.tabId >= 0) {
+    await chrome.tabs.update(existing.tabId, { active: true });
+    if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
+    return;
+  }
+  await chrome.tabs.create({ url });
+}

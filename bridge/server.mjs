@@ -4,13 +4,19 @@ import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { resolveZellij, bridgePaths } from './platform.mjs';
+import { resolveZellij, bridgePaths, projectRoot } from './platform.mjs';
+import { McpSessionStore, DEFAULT_TTL_MS } from './mcp/store.mjs';
+import { ZellijClient } from './mcp/zellij.mjs';
+import { JobManager } from './mcp/jobs.mjs';
+import { createTools } from './mcp/tools.mjs';
+import { createMcpHandler } from './mcp/handler.mjs';
 import { preparePty } from '../scripts/prepare-pty.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import {
   MAX_MESSAGE_BYTES, MAX_BUFFER_BYTES, validToken, isExtensionOrigin,
   parseClientMessage, parseSessions, noSessions, launchArgs, terminalEnv,
+  snapshotRoute, snapshotArgs, snapshotLayout, sanitizeDump, snapshotFailure,
 } from './protocol.mjs';
 
 await preparePty();
@@ -43,10 +49,11 @@ if (!token) {
 if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token || '')) throw new Error('Pairing token must contain 32–256 letters, numbers, underscores, or hyphens.');
 const env = terminalEnv();
 const version = await exec(executable, ['--version'], { env, timeout: 5000, windowsHide: true });
-const allowedOrigin = process.env.WEBSHELL_EXTENSION_ID;
-if (allowedOrigin && !/^[a-p]{32}$/.test(allowedOrigin)) throw new Error('Invalid WEBSHELL_EXTENSION_ID.');
+// Optional pin: one or more comma-separated extension IDs (e.g. Side Shell and TabManager).
+const allowedExtensions = (process.env.WEBSHELL_EXTENSION_ID || '').split(',').map(id => id.trim()).filter(Boolean);
+if (allowedExtensions.some(id => !/^[a-p]{32}$/.test(id))) throw new Error('Invalid WEBSHELL_EXTENSION_ID.');
 function originAllowed(origin) {
-  return isExtensionOrigin(origin) && (!allowedOrigin || origin === `chrome-extension://${allowedOrigin}`);
+  return isExtensionOrigin(origin) && (!allowedExtensions.length || allowedExtensions.includes(origin.slice('chrome-extension://'.length)));
 }
 function validHost(req) { return req.headers.host === `${host}:${port}`; }
 function httpOrigin(req) {
@@ -59,12 +66,84 @@ function httpOrigin(req) {
 function authorize(req) {
   return validHost(req) && originAllowed(httpOrigin(req)) && validToken(req.headers.authorization?.replace(/^Bearer /, ''), token);
 }
+// Bound concurrent Zellij query processes so a dashboard refresh cannot fork-bomb the machine.
+const queryQueue = [];
+let queryActive = 0;
+async function zellijQuery(args, maxBuffer = 1024 * 1024) {
+  if (queryActive >= 6) await new Promise(resolve => queryQueue.push(resolve));
+  queryActive++;
+  try { return await exec(executable, args, { env, timeout: 5000, windowsHide: true, maxBuffer }); }
+  finally { queryActive--; queryQueue.shift()?.(); }
+}
+async function queryJson(session, action) {
+  const result = await zellijQuery(snapshotArgs(session, action), 4 * 1024 * 1024);
+  // An unknown session exits 0 but prints a session listing instead of JSON.
+  try { return JSON.parse(result.stdout); }
+  catch { throw Object.assign(new Error('Unexpected Zellij output.'), { stdout: result.stdout, stderr: result.stderr }); }
+}
+async function captureSnapshot(session) {
+  const [tabs, panes] = await Promise.all([
+    queryJson(session, ['list-tabs', '--json', '--all']),
+    queryJson(session, ['list-panes', '--json', '--all']),
+  ]);
+  const layout = snapshotLayout(tabs, panes);
+  await Promise.all(layout.panes.filter(pane => !pane.plugin).map(async pane => {
+    try {
+      const result = await zellijQuery(snapshotArgs(session, ['dump-screen', '--pane-id', pane.id, '--ansi']), 2 * 1024 * 1024);
+      Object.assign(pane, sanitizeDump(result.stdout));
+    } catch {
+      // A pane can close between listing and dumping; show it empty rather than failing the session.
+      pane.content = '';
+    }
+  }));
+  return { session, capturedAt: Date.now(), ...layout };
+}
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body));
 }
 
+// ---- MCP (Streamable HTTP) -----------------------------------------------------
+const ttlHours = Number(process.env.WEBSHELL_MCP_TTL_HOURS || DEFAULT_TTL_MS / 3_600_000);
+if (!Number.isFinite(ttlHours) || ttlHours < 1 || ttlHours > 720) throw new Error('WEBSHELL_MCP_TTL_HOURS must be between 1 and 720.');
+const packageVersion = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8')).version;
+const mcpStore = new McpSessionStore({ file: path.join(stateDir, 'mcp-sessions.json'), token, ttlMs: ttlHours * 3_600_000 });
+await mcpStore.load();
+const zellijClient = new ZellijClient({
+  query: zellijQuery, cwd,
+  spawnPty: (args, options) => pty.spawn(executable, args, { name: 'xterm-256color', cols: options.cols || 160, rows: options.rows || 45, cwd: options.cwd || cwd, env }),
+});
+const jobs = new JobManager({ cwd, env });
+const mcp = createMcpHandler({
+  store: mcpStore,
+  tools: createTools({ store: mcpStore, zellij: zellijClient, jobs }),
+  serverInfo: { name: 'side-shell', title: 'Side Shell terminals', version: packageVersion },
+});
+function handleMcp(req, res) {
+  if (!validHost(req)) return json(res, 403, { error: 'Invalid Host header.' });
+  // Native MCP clients send no Origin. Browsers always send one on cross-origin requests,
+  // so a present Origin must be an allowed extension: websites can never reach the shell.
+  const origin = req.headers.origin;
+  if (origin !== undefined && !originAllowed(origin)) return json(res, 403, { error: 'Origin not allowed.' });
+  if (origin !== undefined) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+    res.setHeader('Vary', 'Origin');
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version',
+      'Access-Control-Max-Age': '600',
+    });
+    return res.end();
+  }
+  if (!validToken(req.headers.authorization?.replace(/^Bearer /, ''), token)) return json(res, 401, { error: 'Invalid or missing bearer token.' });
+  return mcp.handle(req, res);
+}
+
 const server = http.createServer(async (req, res) => {
+  if (req.url === '/mcp') return handleMcp(req, res);
   const origin = httpOrigin(req);
   if (!validHost(req) || !originAllowed(origin)) return json(res, 403, { error: 'Extension origin required. Reload the updated extension and restart the bridge.' });
   res.setHeader('Access-Control-Allow-Origin', origin);
@@ -75,7 +154,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (!authorize(req)) return json(res, 401, { error: 'Invalid pairing token.' });
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed.' });
-  if (req.url === '/health') return json(res, 200, { version: version.stdout.trim() });
+  // `features` lets the extension detect a bridge started before a capability existed.
+  if (req.url === '/health') return json(res, 200, { version: version.stdout.trim(), features: ['snapshots', 'mcp'] });
   if (req.url === '/sessions') {
     try {
       const result = await exec(executable, ['list-sessions', '--no-formatting'], { env, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
@@ -84,6 +164,16 @@ const server = http.createServer(async (req, res) => {
       if (noSessions(error)) return json(res, 200, { sessions: [] });
       console.error('Zellij session listing failed:', error.stderr || error.stdout || error.message);
       return json(res, 500, { error: 'Could not list Zellij sessions. Check the bridge terminal.' });
+    }
+  }
+  const snapshotSession = snapshotRoute(req.url);
+  if (snapshotSession === false) return json(res, 400, { error: 'Invalid session name.' });
+  if (snapshotSession) {
+    try { return json(res, 200, await captureSnapshot(snapshotSession)); }
+    catch (error) {
+      const failure = snapshotFailure(error);
+      if (failure.status === 500) console.error(`Snapshot of ${snapshotSession} failed:`, error.stderr || error.stdout || error.message);
+      return json(res, failure.status, { error: failure.error });
     }
   }
   json(res, 404, { error: 'Not found.' });
@@ -180,9 +270,16 @@ server.listen(port, host, () => {
   console.log(`Listening only on http://${host}:${port}`);
   console.log(`Pairing token: ${token}`);
   console.log('Paste this token into the extension settings. Do not share it.');
+  console.log(`MCP endpoint: http://${host}:${port}/mcp (Authorization: Bearer <token>; idle MCP sessions expire after ${ttlHours}h)`);
   console.log('Close the sidebar to detach; Zellij sessions keep running.\n');
+  // Release anything that expired while the bridge was stopped (after a startup grace period).
+  void mcp.sweep().catch(error => console.error(`MCP sweep failed: ${error.message}`));
 });
 function shutdown() {
+  mcp.close();
+  jobs.shutdown();
+  // Only the bridge's sizing clients exit; agent Zellij sessions keep running.
+  zellijClient.shutdown();
   for (const ws of wss.clients) ws.terminate();
   wss.close();
   server.close();
