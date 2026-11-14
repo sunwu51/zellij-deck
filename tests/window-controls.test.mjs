@@ -72,3 +72,40 @@ test('fullscreen falls back to a dedicated window; popouts retain current sessio
     }
   }
 });
+
+test('session launcher opens Watch, Interact and Create in dedicated popup windows', async () => {
+  const { openSessionWindow } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const oldChrome = globalThis.chrome;
+  const windows = [];
+  globalThis.chrome = {
+    runtime: { getURL: () => base },
+    windows: { async create(options) { windows.push(options); return { id: windows.length }; } },
+  };
+  try {
+    for (const mode of ['watch', 'attach', 'create']) {
+      await openSessionWindow({ session: 'dev', mode });
+      const options = windows.at(-1);
+      assert.equal(options.type, 'popup');
+      assert.equal(options.focused, true);
+      assert.equal(options.width, 1100);
+      assert.equal(options.height, 760);
+      assert.deepEqual(windowTarget(new URL(options.url).hash), { session: 'dev', mode });
+    }
+    assert.equal(windows.length, 3);
+  } finally {
+    if (oldChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = oldChrome;
+  }
+});
+
+test('an explicit Create opens a window that creates once, then only attaches', async () => {
+  const { attachedUrl } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const created = popoutUrl(base, { session: 'dev', mode: 'create' }, { create: true });
+  assert.deepEqual(windowTarget(new URL(created).hash), { session: 'dev', mode: 'create' }, 'explicit Create asks the window to create');
+  assert.deepEqual(windowTarget(new URL(popoutUrl(base, { session: 'dev', mode: 'create' })).hash), { session: 'dev', mode: 'attach' }, 'without the option it never creates');
+  assert.deepEqual(windowTarget(new URL(popoutUrl(base, { session: 'dev', mode: 'watch' }, { create: true })).hash), { session: 'dev', mode: 'watch' }, 'only Create sets the flag');
+  const afterConnect = attachedUrl(created, { session: 'dev', mode: 'create' });
+  assert.deepEqual(windowTarget(new URL(afterConnect).hash), { session: 'dev', mode: 'attach' }, 'once connected, a reload only attaches');
+  assert.equal(new URL(afterConnect).pathname, new URL(base).pathname);
+  assert.equal(windowTarget('#view=window&session=dev&mode=watch&new=1')?.mode, 'watch', 'new=1 never turns Watch into Create');
+});

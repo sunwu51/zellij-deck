@@ -1,11 +1,17 @@
 export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' };
-export function popoutUrl(base: string, target?: WindowTarget): string {
+const WINDOW_SIZE = { width: 1100, height: 760 };
+/**
+ * A window attaches to an existing session and never creates one implicitly. Only an explicit
+ * "Create" (`create: true`) adds the one-time `new=1` flag; the window drops it once connected
+ * (see `attachedUrl`), so reloading it never re-creates or resurrects a session.
+ */
+export function popoutUrl(base: string, target?: WindowTarget, options: { create?: boolean } = {}): string {
   const url = new URL(base);
   const params = new URLSearchParams({ view: 'window' });
   if (target) {
     params.set('session', target.session);
-    // A window attaches to an existing session; never create one implicitly.
     params.set('mode', target.mode === 'watch' ? 'watch' : 'attach');
+    if (options.create && target.mode === 'create') params.set('new', '1');
   }
   url.hash = params.toString();
   return url.href;
@@ -15,7 +21,19 @@ export function windowTarget(hash: string): WindowTarget | undefined {
   const session = params.get('session') || '';
   const mode = params.get('mode');
   if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach')) return;
+  if (mode === 'attach' && params.get('new') === '1') return { session, mode: 'create' };
   return { session, mode };
+}
+/** The window's URL once its session is connected: same session and mode, never `new=1`. */
+export function attachedUrl(href: string, target: WindowTarget): string {
+  return popoutUrl(href.split('#')[0], { session: target.session, mode: target.mode === 'watch' ? 'watch' : 'attach' });
+}
+/** Open a session in its own terminal window (the side panel is too narrow to work in). */
+export async function openSessionWindow(target: WindowTarget): Promise<void> {
+  await chrome.windows.create({
+    url: popoutUrl(chrome.runtime.getURL('sidepanel.html'), target, { create: true }),
+    type: 'popup', ...WINDOW_SIZE, focused: true,
+  });
 }
 
 export function initWindowControls(getTarget: () => WindowTarget | undefined, notify: (message: string) => void, resize: () => void) {
@@ -27,7 +45,7 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
   async function openWindow(full = false) {
     const created = await chrome.windows.create({
       url: popoutUrl(chrome.runtime.getURL('sidepanel.html'), getTarget()),
-      type: 'popup', width: 1100, height: 760, focused: true,
+      type: 'popup', ...WINDOW_SIZE, focused: true,
     });
     if (full && created?.id !== undefined) await chrome.windows.update(created.id, { state: 'fullscreen' });
   }

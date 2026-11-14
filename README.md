@@ -35,7 +35,7 @@ The bridge prints its port and pairing token. Keep this terminal running.
 2. Click **Load unpacked** and choose this project's **dist** folder.
 3. Pin **Side Shell · Zellij**, then click its toolbar icon to open the sidebar. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
 4. Paste the bridge's pairing token into the sidebar settings and click **Save & connect bridge**. The default port is **17329**. This verifies access and loads sessions; it does not open a terminal yet.
-5. Choose a session and click **Open session**. **Watch** is read-only; **Interact** attaches a normal Zellij client.
+5. Choose a session and click **Open in window**. The side panel is a launcher: each session opens in its own resizable terminal window, because the panel is too narrow to work in. **Watch** is read-only; **Interact** attaches a normal Zellij client. **Create a session** also opens the new session in a window.
 6. To start a dedicated session for the sidebar, expand **Create a session**, enter a name, and click **Create**. You can create another while connected.
 7. To switch, choose another session and mode, then click **Switch**. The previous session keeps running. There is one visible terminal at a time, but multiple persistent sessions can run.
 
@@ -56,6 +56,8 @@ Watch mode uses the actual `zellij watch` command and also drops input at the br
 ## Fullscreen and pop-out windows
 
 Use **⛶** in the header to toggle fullscreen. If Chrome does not permit the side panel to enter document fullscreen, Side Shell opens a dedicated fullscreen extension window instead. In a pop-out, the same button enters/exits window fullscreen and restores its previous normal/maximized state. For document fullscreen, Escape also exits; for window fullscreen use the button or the OS/Chrome fullscreen controls.
+
+Sessions opened from the side panel always get their own window. Inside a window, **Open session** switches that window in place. A window created by **Create a session** creates the session once; after it connects, its URL only attaches, so reloading it never re-creates or resurrects a session.
 
 Use **↗** to open a resizable standalone terminal window. When a session is connected, the new window automatically attaches to that same session with the same Watch/Interact mode; it never implicitly creates or resurrects via `--create`. Pairing credentials are read from extension storage, not placed in the URL. Without a connected session, the new window opens the session picker.
 
