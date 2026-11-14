@@ -193,7 +193,8 @@ export function createTools({ store, zellij }) {
         }
         const cwd = await directory(args.cwd);
         const firstWord = command?.trim().split(/\s+/).find(word => word !== '&') ?? 'shell';
-        const name = (args.name !== undefined ? text(args.name, 'name', 64) : path.basename(firstWord.replace(/^["'.]+|["']+$/g, '')).replace(/\.(exe|cmd|bat|ps1|sh)$/i, ''))
+        // Derive a display name using either path separator, regardless of the bridge OS.
+        const name = (args.name !== undefined ? text(args.name, 'name', 64) : path.posix.basename(firstWord.replace(/^["'.]+|["']+$/g, '').replace(/\\/g, '/')).replace(/\.(exe|cmd|bat|ps1|sh)$/i, ''))
           .replace(/[\u0000-\u001f\u007f]/g, '').trim() || 'pane';
         let ctx = await context(owner);
         const note = takeLostNote(owner);

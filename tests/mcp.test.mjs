@@ -570,3 +570,18 @@ test('a pane name defaults to the command\'s program', async () => {
   assert.equal((await tools.call('pane_open', {}, context)).name, 'shell');
   assert.equal((await tools.call('pane_open', { command: 'ls', name: 'custom' }, context)).name, 'custom');
 });
+
+test('pane names accept both path styles under POSIX and Windows host rules', async () => {
+  const original = path.basename;
+  try {
+    for (const host of [path.posix, path.win32]) {
+      path.basename = host.basename;
+      const { tools, owner } = toolsWithFake({ session: null });
+      for (const command of ["& 'C:\\tools\\runner.exe' -x", '/usr/local/bin/runner --fast']) {
+        assert.equal((await tools.call('pane_open', { command }, { owner })).name, 'runner');
+      }
+    }
+  } finally {
+    path.basename = original;
+  }
+});
