@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import net from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
@@ -24,8 +24,11 @@ const session = `ss-${process.pid.toString(36)}-${Date.now().toString(36).slice(
 const secondSession = `${session}-b`;
 // Never share the real .bridge state (MCP session ownership) with a test bridge.
 const stateDir = await mkdtemp(path.join(tmpdir(), 'side-shell-it-'));
+const configPath = path.join(stateDir, 'integration.kdl');
+await writeFile(configPath, 'session_serialization true\nserialization_interval 1\ndisable_session_metadata false\n');
+const testEnv = { ...process.env, ZELLIJ_CONFIG_FILE: configPath };
 const bridge = spawn(process.execPath, ['bridge/server.mjs'], {
-  env: { ...process.env, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token, WEBSHELL_STATE_DIR: stateDir },
+  env: { ...testEnv, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token, WEBSHELL_STATE_DIR: stateDir },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let logs = '';
@@ -109,6 +112,15 @@ try {
   const second = await connect('create', secondSession);
   await waitFor(async () => (await listSessions()).some(s => s.name === secondSession && !s.exited), 'second Zellij session appears', 18000);
   await waitFor(() => second.output().length > 50, 'second PTY produces output');
+  // Wait for a real layout and one serialization tick before detaching; initial PTY
+  // output can be just ConPTY's preamble, before Zellij has saved resurrection data.
+  await waitFor(async () => {
+    try {
+      const result = await exec(executable, ['--session', secondSession, 'action', 'list-panes', '--json', '--all'], { env: terminalEnv(testEnv), timeout: 5000 });
+      return JSON.parse(result.stdout).length > 0;
+    } catch { return false; }
+  }, 'second session layout ready');
+  await pause(2500);
   second.ws.close();
   await once(second.ws, 'close');
   await pause(500);
@@ -140,10 +152,35 @@ try {
   assert.equal(watcher.failure(), '');
   assert.equal(watcher.output().includes('SHOULD_NOT_RUN'), false, 'Read-only input must not reach the terminal');
   console.log('PASS: Read-only watcher reconnects, receives output, and drops input');
+  const remove = (name, headers = auth) => fetch(`http://127.0.0.1:${port}/sessions/${name}`, {
+    method: 'DELETE', headers: { Origin: origin, ...headers }, signal: AbortSignal.timeout(10000),
+  });
+  assert.equal((await remove(session, {})).status, 401);
+  assert.equal((await remove(session, { ...auth, Origin: 'https://example.com' })).status, 403);
+  assert.equal((await remove('--help')).status, 400);
+  assert.equal((await remove(`${session}-missing`)).status, 404);
+  const preflight = await fetch(`http://127.0.0.1:${port}/sessions/${session}`, { method: 'OPTIONS', headers: { Origin: origin } });
+  assert.match(preflight.headers.get('access-control-allow-methods'), /DELETE/);
+  const closed = once(watcher.ws, 'close');
+  const deleted = await remove(session);
+  assert.equal(deleted.status, 200, await deleted.text());
+  await closed;
+  assert.equal((await listSessions()).some(s => s.name === session), false, 'Deleted session must not remain as exited/resurrectable');
+  assert.ok((await listSessions()).some(s => s.name === secondSession && !s.exited), 'Other sessions must keep running');
+  await exec(executable, ['kill-session', secondSession], { env: terminalEnv(testEnv), timeout: 5000 });
+  await waitFor(async () => !(await listSessions()).some(s => s.name === secondSession && !s.exited), 'second session stops');
+  if ((await listSessions()).some(s => s.name === secondSession && s.exited)) {
+    assert.equal((await remove(secondSession)).status, 200);
+    assert.equal((await listSessions()).some(s => s.name === secondSession), false);
+    console.log('PASS: Exited session resurrection data is deleted');
+  } else {
+    console.log('SKIP: Native exited-session deletion: this Zellij build did not persist the disposable session; running/exited command handling is covered by unit tests');
+  }
+  console.log('PASS: Authenticated deletion kills running viewers, removes the session, and preserves other sessions');
 } catch (error) {
   for (const [name, output] of terminalOutputs) console.error(`Terminal output (${name}): ${JSON.stringify(output)}`);
   try {
-    const listing = await exec(executable, ['list-sessions', '--no-formatting'], { env: terminalEnv(), timeout: 5000 });
+    const listing = await exec(executable, ['list-sessions', '--no-formatting'], { env: terminalEnv(testEnv), timeout: 5000 });
     console.error('Raw Zellij listing:', JSON.stringify(listing.stdout), JSON.stringify(listing.stderr));
   } catch (listingError) {
     console.error('Raw Zellij listing error:', JSON.stringify(listingError.stdout), JSON.stringify(listingError.stderr));
@@ -153,7 +190,7 @@ try {
   clearTimeout(deadline);
   for (const ws of sockets) ws.terminate();
   for (const name of [session, secondSession]) {
-    try { await exec(executable, ['kill-session', name], { env: terminalEnv(), timeout: 5000 }); } catch {}
+    try { await exec(executable, ['delete-session', '--force', name], { env: terminalEnv(testEnv), timeout: 5000 }); } catch {}
   }
   bridge.kill();
   await new Promise(resolve => setTimeout(resolve, 300));

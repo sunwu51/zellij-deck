@@ -53,8 +53,8 @@ test('bundled font contains Zellij Powerline separator glyphs', async () => {
 });
 
 test('font is scoped to symbols, loaded before xterm, and included in build', async () => {
-  const css = await readFile(new URL('../extension/sidepanel.css', import.meta.url), 'utf8');
-  const panel = await readFile(new URL('../extension/sidepanel.ts', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../extension/terminal.css', import.meta.url), 'utf8');
+  const panel = await readFile(new URL('../extension/terminal.ts', import.meta.url), 'utf8');
   const build = await readFile(new URL('../scripts/build.mjs', import.meta.url), 'utf8');
   assert.match(css, /unicode-range:U\+E000-F8FF/);
   assert.match(css, /SymbolsNerdFontMono-Regular\.ttf/);

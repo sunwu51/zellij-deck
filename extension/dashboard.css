@@ -1,5 +1,5 @@
 @font-face {
-  font-family:'Side Shell Symbols';
+  font-family:'wshell Symbols';
   src:url('./fonts/nerd-fonts-v3.4.0/SymbolsNerdFontMono-Regular.ttf') format('truetype');
   font-style:normal;
   font-weight:100 900;
@@ -40,7 +40,7 @@ main { flex:1; padding:20px 24px 32px; }
 .preview:hover { border-color:var(--border); }
 /* Uniform card size: every tab shape is letterboxed into the same box. */
 .preview canvas { display:block; width:100%; height:100%; object-fit:contain; object-position:top center; }
-.preview-state { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; color:var(--muted); font-size:12px; background:rgba(16,19,21,.82); }
+.preview-state { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; overflow-wrap:anywhere; color:var(--muted); font-size:12px; background:rgba(16,19,21,.82); }
 .preview-state.error { color:var(--danger); }
 .card.stale .preview canvas { opacity:.55; }
 .tabs { display:flex; gap:4px; overflow-x:auto; scrollbar-width:thin; min-width:0; }
@@ -84,4 +84,40 @@ dialog[open] { display:flex; flex-direction:column; }
   #filter { width:100%; }
   .toolbar { width:100%; }
   .focus-header { flex-wrap:wrap; }
+}
+
+/* The dashboard is both the launcher and the session overview. */
+.primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:650; }
+.danger,.error { color:var(--danger); }
+.launcher { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:18px 24px; border-bottom:1px solid var(--border); background:var(--surface); }
+.launcher label { display:block; font-weight:600; margin-bottom:8px; }
+.session-row { display:flex; gap:8px; align-items:center; }
+.session-row select:first-child,.session-row input { flex:1; min-width:0; }
+#create-form { margin:0; }
+.settings { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px 24px; padding:20px 24px; border-bottom:1px solid var(--border); background:var(--surface); }
+.appearance { grid-column:1; grid-row:1 / span 12; min-width:0; }
+.section-heading { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.badge { color:var(--muted); font-size:9px; letter-spacing:.7px; }
+.settings label { color:var(--muted); font-size:12px; }
+.appearance label { display:block; margin:12px 0 6px; }
+.settings-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.settings-row input { width:80px; }
+.checkbox { display:flex; align-items:center; gap:8px; }
+.checkbox input { min-height:0; accent-color:var(--accent); }
+textarea { width:100%; resize:vertical; margin:8px 0; padding:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; font:12px/1.5 ui-monospace,monospace; }
+input[type="file"] { max-width:100%; }
+#theme-preview { padding:12px; margin:12px 0; border:1px solid var(--border); border-radius:6px; font:12px/1.6 ui-monospace,monospace; }
+#theme-swatches { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:4px; margin-top:8px; }
+#theme-swatches span { height:12px; border-radius:2px; }
+#theme-feedback:empty { display:none; }
+#exited-list li span { margin-right:auto; }
+#delete-dialog { width:min(calc(100vw - 32px),460px); padding:24px; }
+#delete-dialog p { overflow-wrap:anywhere; }
+.delete-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:24px; }
+@media (max-width:700px) {
+  .launcher,.settings { grid-template-columns:1fr; padding:16px; gap:18px; }
+  .appearance { grid-row:auto; grid-column:auto; }
+  .launcher .session-row { flex-wrap:wrap; }
+  .launcher .session-row select:first-child { flex-basis:100%; }
+  .card-actions { flex-wrap:wrap; }
 }

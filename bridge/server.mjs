@@ -7,9 +7,9 @@ import path from 'node:path';
 import { resolveZellij, bridgePaths, projectRoot } from './platform.mjs';
 import { McpSessionStore, DEFAULT_TTL_MS } from './mcp/store.mjs';
 import { ZellijClient } from './mcp/zellij.mjs';
-import { JobManager } from './mcp/jobs.mjs';
 import { createTools } from './mcp/tools.mjs';
 import { createMcpHandler } from './mcp/handler.mjs';
+import { sessionRoute, deleteSession } from './sessions.mjs';
 import { preparePty } from '../scripts/prepare-pty.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
@@ -49,7 +49,7 @@ if (!token) {
 if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token || '')) throw new Error('Pairing token must contain 32–256 letters, numbers, underscores, or hyphens.');
 const env = terminalEnv();
 const version = await exec(executable, ['--version'], { env, timeout: 5000, windowsHide: true });
-// Optional pin: one or more comma-separated extension IDs (e.g. Side Shell and TabManager).
+// Optional pin: one or more comma-separated extension IDs (e.g. wshell and TabManager).
 const allowedExtensions = (process.env.WEBSHELL_EXTENSION_ID || '').split(',').map(id => id.trim()).filter(Boolean);
 if (allowedExtensions.some(id => !/^[a-p]{32}$/.test(id))) throw new Error('Invalid WEBSHELL_EXTENSION_ID.');
 function originAllowed(origin) {
@@ -60,7 +60,7 @@ function httpOrigin(req) {
   // Privileged extension fetches can omit Origin. Require an explicit extension
   // identity in that case; never use it to override a supplied, hostile Origin.
   if (req.headers.origin !== undefined) return req.headers.origin;
-  const extensionId = req.headers['x-side-shell-extension'];
+  const extensionId = req.headers['x-wshell-extension'] || req.headers['x-side-shell-extension'];
   return typeof extensionId === 'string' ? `chrome-extension://${extensionId}` : undefined;
 }
 function authorize(req) {
@@ -113,11 +113,10 @@ const zellijClient = new ZellijClient({
   query: zellijQuery, cwd,
   spawnPty: (args, options) => pty.spawn(executable, args, { name: 'xterm-256color', cols: options.cols || 160, rows: options.rows || 45, cwd: options.cwd || cwd, env }),
 });
-const jobs = new JobManager({ cwd, env });
 const mcp = createMcpHandler({
   store: mcpStore,
-  tools: createTools({ store: mcpStore, zellij: zellijClient, jobs }),
-  serverInfo: { name: 'side-shell', title: 'Side Shell terminals', version: packageVersion },
+  tools: createTools({ store: mcpStore, zellij: zellijClient }),
+  serverInfo: { name: 'wshell', title: 'wshell terminals', version: packageVersion },
 });
 function handleMcp(req, res) {
   if (!validHost(req)) return json(res, 403, { error: 'Invalid Host header.' });
@@ -147,15 +146,27 @@ const server = http.createServer(async (req, res) => {
   const origin = httpOrigin(req);
   if (!validHost(req) || !originAllowed(origin)) return json(res, 403, { error: 'Extension origin required. Reload the updated extension and restart the bridge.' });
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin, X-Side-Shell-Extension');
+  res.setHeader('Vary', 'Origin, X-WShell-Extension, X-Side-Shell-Extension');
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, X-Side-Shell-Extension' });
+    res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, X-WShell-Extension, X-Side-Shell-Extension' });
     return res.end();
   }
   if (!authorize(req)) return json(res, 401, { error: 'Invalid pairing token.' });
+  if (req.method === 'DELETE') {
+    const name = sessionRoute(req.url);
+    if (name === false) return json(res, 400, { error: 'Invalid session name.' });
+    if (!name) return json(res, 404, { error: 'Not found.' });
+    try {
+      if (!(await deleteSession(name, zellijQuery))) return json(res, 404, { error: 'Session not found. Refresh the dashboard.' });
+      return json(res, 200, { deleted: name });
+    } catch (error) {
+      console.error(`Deleting session ${name} failed:`, error.stderr || error.stdout || error.message);
+      return json(res, 500, { error: 'Could not kill and delete the session. Check the bridge terminal and retry.' });
+    }
+  }
   if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed.' });
   // `features` lets the extension detect a bridge started before a capability existed.
-  if (req.url === '/health') return json(res, 200, { version: version.stdout.trim(), features: ['snapshots', 'mcp'] });
+  if (req.url === '/health') return json(res, 200, { version: version.stdout.trim(), features: ['snapshots', 'mcp', 'session-delete'] });
   if (req.url === '/sessions') {
     try {
       const result = await exec(executable, ['list-sessions', '--no-formatting'], { env, timeout: 5000, windowsHide: true, maxBuffer: 1024 * 1024 });
@@ -263,7 +274,7 @@ server.on('error', error => {
   process.exitCode = 1;
 });
 server.listen(port, host, () => {
-  console.log(`\nSide Shell bridge — ${version.stdout.trim()}`);
+  console.log(`\nwshell bridge — ${version.stdout.trim()}`);
   console.log(`Platform: ${process.platform}/${process.arch}`);
   console.log(`Zellij: ${executable}`);
   console.log(`State directory: ${stateDir}`);
@@ -271,13 +282,12 @@ server.listen(port, host, () => {
   console.log(`Pairing token: ${token}`);
   console.log('Paste this token into the extension settings. Do not share it.');
   console.log(`MCP endpoint: http://${host}:${port}/mcp (Authorization: Bearer <token>; idle MCP sessions expire after ${ttlHours}h)`);
-  console.log('Close the sidebar to detach; Zellij sessions keep running.\n');
+  console.log('Close a terminal window to detach; Zellij sessions keep running.\n');
   // Release anything that expired while the bridge was stopped (after a startup grace period).
   void mcp.sweep().catch(error => console.error(`MCP sweep failed: ${error.message}`));
 });
 function shutdown() {
   mcp.close();
-  jobs.shutdown();
   // Only the bridge's sizing clients exit; agent Zellij sessions keep running.
   zellijClient.shutdown();
   for (const ws of wss.clients) ws.terminate();

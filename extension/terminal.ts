@@ -1,19 +1,26 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { keyAction, controlCharacter } from './keyboard';
-import { terminalColorOptions } from './theme';
+import { keyAction, controlCharacter, shiftEnterSequence, applyKittyKeyboard } from './keyboard';
+import { terminalColorOptions, selectedPalette, normalizeAppearance } from './theme';
+import { useModernWidths } from './unicode';
+import {
+  FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT,
+  migrateFontSize, lineHeightOrDefault,
+} from './font';
 import { initThemeControls } from './theme-controls';
-import { initWindowControls, openDashboard, windowTarget } from './window-controls';
+import { initWindowControls, openDashboard, windowTarget, attachedUrl } from './window-controls';
 
-type Settings = { port: number; token: string; fontSize: number; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
+type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
 type Session = { name: string; exited: boolean; current: boolean };
 type Target = { session: string; mode: 'watch' | 'attach' | 'create' };
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+// This page is only a dedicated terminal; the dashboard is the launcher.
 const settingsPanel = element('settings');
 const toggle = element<HTMLButtonElement>('settings-toggle');
 const portInput = element<HTMLInputElement>('port');
 const tokenInput = element<HTMLInputElement>('token');
 const fontInput = element<HTMLInputElement>('font-size');
+const lineHeightInput = element<HTMLInputElement>('line-height');
 const reconnectInput = element<HTMLInputElement>('auto-reconnect');
 const sessionSelect = element<HTMLSelectElement>('session');
 const watchButton = element<HTMLButtonElement>('watch');
@@ -22,7 +29,7 @@ const connectButton = element<HTMLButtonElement>('connect');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const refreshButton = element<HTMLButtonElement>('refresh');
 const notice = element('notice');
-let settings: Settings = { port: 17329, token: '', fontSize: 13, autoReconnect: true, session: '', mode: 'watch' };
+let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch' };
 let socket: WebSocket | undefined;
 let target: Target | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -35,17 +42,19 @@ let refreshController: AbortController | undefined;
 // packaged fallback before xterm measures or draws its first terminal cells.
 let symbolFontFailed = false;
 try {
-  const faces = await document.fonts.load('13px "Side Shell Symbols"', '');
+  const faces = await document.fonts.load('13px "wshell Symbols"', '');
   symbolFontFailed = faces.length === 0;
 } catch { symbolFontFailed = true; }
 
 const terminal = new Terminal({
-  cursorBlink: true, fontSize: 13,
-  fontFamily: '"Side Shell Symbols", "Cascadia Code", Consolas, Menlo, monospace',
-  scrollback: 5000, allowProposedApi: false, allowTransparency: false,
+  cursorStyle: 'bar', cursorWidth: 2, cursorBlink: true,
+  fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT,
+  fontFamily: FONT_FAMILY,
+  scrollback: 5000, allowProposedApi: true, allowTransparency: false,
   disableStdin: true,
   ...terminalColorOptions,
 });
+useModernWidths(terminal);
 const fit = new FitAddon();
 terminal.loadAddon(fit);
 terminal.open(element('terminal'));
@@ -63,6 +72,10 @@ function setSessionControlsOpen(open: boolean) {
   element('session-controls').hidden = !open;
   element('session-toggle').setAttribute('aria-expanded', String(open));
   element('session-toggle-label').textContent = open ? 'Collapse ▴' : 'Expand ▾';
+  // Collapsing also hides the brand header so the terminal gets that height; the
+  // header buttons move into the slim session bar so they stay one click away.
+  element('header').hidden = !open;
+  (open ? element('header') : element('session-bar')).append(element('header-actions'));
   requestAnimationFrame(resize);
 }
 element('session-toggle').addEventListener('click', () => {
@@ -112,6 +125,15 @@ function sendInput(data: string) {
   socket.send(JSON.stringify({ type: 'input', data }));
 }
 terminal.onData(sendInput);
+// The Zellij client enables the kitty keyboard protocol (CSI > 1 u); track it so Shift+Enter
+// can be encoded the way Windows Terminal and kitty send it.
+let kittyKeyboard: number[] = [];
+for (const prefix of ['>', '<', '=']) {
+  terminal.parser.registerCsiHandler({ prefix, final: 'u' }, params => {
+    kittyKeyboard = applyKittyKeyboard(kittyKeyboard, prefix, params);
+    return true;
+  });
+}
 const isMac = /Mac/i.test(navigator.platform);
 const keyboardHint = isMac
   ? 'Paste: Cmd+V · Copy: Cmd+C · Send Ctrl: Ctrl+. then a letter'
@@ -142,6 +164,13 @@ terminal.attachCustomKeyEventHandler(event => {
       if (data !== null) sendInput(data);
       else showNotice('After Ctrl+., press A–Z to send a Ctrl key, or Escape to cancel.');
     }
+    return false;
+  }
+  const shiftEnter = shiftEnterSequence(event, kittyKeyboard.at(-1) ?? 0);
+  if (shiftEnter !== null) {
+    // Swallow the keypress/keyup too, so xterm.js never sends its own CR.
+    event.preventDefault();
+    if (event.type === 'keydown') sendInput(shiftEnter);
     return false;
   }
   const action = keyAction(event);
@@ -224,7 +253,7 @@ async function refreshSessions(quiet = false) {
     }
     if (Array.from(sessionSelect.options).some(option => option.value === selected)) sessionSelect.value = selected;
     element('session-help').textContent = sessions.length
-      ? `${sessions.filter(session => !session.exited).length} running · Choose a session and open it. Switching keeps other sessions running.`
+      ? `${sessions.filter(session => !session.exited).length} running · Choose a session and open it. Other sessions keep running.`
       : 'Bridge connected. Create a session below, or start one in your local Zellij terminal.';
     if (!quiet) showNotice();
     if (!target) status('Bridge connected · choose a session');
@@ -240,13 +269,44 @@ async function refreshSessions(quiet = false) {
     if (refreshController === controller) refreshButton.disabled = false;
   }
 }
+// Zellij draws a frame in several chunks (ConPTY splits them), with the cursor parked at
+// intermediate positions such as the status line. Writing each chunk as it arrives lets the
+// browser paint between them; xterm moves its hidden input box to the cursor on every paint,
+// so an open IME candidate window jumped there and back on each redraw. Hand xterm everything
+// that arrives within a few milliseconds as one write, so only the final cursor is painted.
+const OUTPUT_BATCH_MS = 8;
+let batch = '';
+let batchLength = 0;
+let batchTimer: ReturnType<typeof setTimeout> | undefined;
+function flushOutput() {
+  clearTimeout(batchTimer);
+  batchTimer = undefined;
+  if (!batch) return;
+  const data = batch, length = batchLength;
+  batch = '';
+  batchLength = 0;
+  terminal.write(data, () => { outputPending -= length; });
+}
+function queueOutput(data: string, length: number) {
+  batch += data;
+  batchLength += length;
+  batchTimer ??= setTimeout(flushOutput, OUTPUT_BATCH_MS);
+}
+function dropQueuedOutput() {
+  clearTimeout(batchTimer);
+  batchTimer = undefined;
+  outputPending -= batchLength;
+  batch = '';
+  batchLength = 0;
+}
 function detach() {
+  dropQueuedOutput();
   clearTimeout(retryTimer);
   target = undefined;
   ready = false;
   const old = socket;
   socket = undefined;
-  old?.close(1000, 'Sidebar detached.');
+  old?.close(1000, 'Terminal detached.');
   terminal.options.disableStdin = true;
   clearCtrlPrefix();
   updateKeyboardControls();
@@ -269,14 +329,16 @@ function connect(next: Target, retry = false) {
   status(`${retry ? 'Reconnecting' : 'Connecting'} · ${next.session}`, 'connecting');
   resize();
   let ws: WebSocket;
-  try { ws = new WebSocket(`ws://127.0.0.1:${settings.port}/terminal`, ['side-shell-v1', `pair.${settings.token}`]); }
+  try { ws = new WebSocket(`ws://127.0.0.1:${settings.port}/terminal`, ['wshell-v1', `pair.${settings.token}`]); }
   catch (error) { detach(); showNotice(String(error)); return; }
   socket = ws;
   let intentionalExit = false;
   const timeout = setTimeout(() => { if (socket === ws && !ready) ws.close(); }, 10000);
   ws.onopen = () => {
     if (socket !== ws) return ws.close();
+    dropQueuedOutput();
     terminal.reset();
+    kittyKeyboard = []; // the new Zellij client enables it again
     ws.send(JSON.stringify({ type: 'open', ...next, cols: terminal.cols, rows: terminal.rows }));
   };
   ws.onmessage = event => {
@@ -293,13 +355,15 @@ function connect(next: Target, retry = false) {
           ws.close();
           return;
         }
-        terminal.write(message.data, () => { outputPending -= length; });
+        queueOutput(message.data, length);
       } else if (message.type === 'ready') {
         clearTimeout(timeout);
         ready = true;
         retries = 0;
         // Never recreate a session automatically after the first successful connection.
         if (target?.mode === 'create') target = { ...target, mode: 'attach' };
+        // drop a window's one-time create flag, so reloading it only attaches
+        if (target) history.replaceState(null, '', attachedUrl(location.href, target));
         terminal.options.disableStdin = next.mode === 'watch';
         updateKeyboardControls();
         element('empty-state').hidden = true;
@@ -355,9 +419,12 @@ toggle.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
 watchButton.addEventListener('click', () => setMode('watch'));
 attachButton.addEventListener('click', () => setMode('attach'));
 refreshButton.addEventListener('click', () => { void refreshSessions(); });
+function openSession(next: Target) {
+  connect(next);
+}
 connectButton.addEventListener('click', () => {
   if (!sessionSelect.value) { showNotice('Choose a session, or create a new one below.'); return; }
-  connect({ session: sessionSelect.value, mode: settings.mode });
+  void openSession({ session: sessionSelect.value, mode: settings.mode });
 });
 disconnectButton.addEventListener('click', () => { detach(); showNotice(); });
 element('create-form').addEventListener('submit', event => {
@@ -365,38 +432,66 @@ element('create-form').addEventListener('submit', event => {
   const name = element<HTMLInputElement>('new-name').value.trim();
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(name)) { showNotice('Use letters, numbers, dots, underscores, or hyphens for session names.'); return; }
   setMode('attach');
-  connect({ session: name, mode: 'create' });
+  void openSession({ session: name, mode: 'create' });
 });
 element('save-settings').addEventListener('click', async () => {
   const port = Number(portInput.value);
   const fontSize = Number(fontInput.value);
+  const lineHeight = Number(lineHeightInput.value);
   const token = tokenInput.value.trim();
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return showNotice('Port must be between 1024 and 65535.');
-  if (!Number.isInteger(fontSize) || fontSize < 10 || fontSize > 24) return showNotice('Font size must be between 10 and 24.');
+  if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) return showNotice(`Font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}.`);
+  if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return showNotice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
   if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return showNotice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   detach();
-  settings = { ...settings, port, fontSize, token, autoReconnect: reconnectInput.checked };
+  settings = { ...settings, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked };
   try { await chrome.storage.local.set({ settings }); }
   catch { showNotice('Could not save settings. Please retry.'); return; }
   terminal.options.fontSize = fontSize;
+  terminal.options.lineHeight = lineHeight;
   setSettingsOpen(false);
   resize();
   await refreshSessions();
 });
 window.addEventListener('pagehide', detach);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.appearance) {
+    const colors = selectedPalette(normalizeAppearance(changes.appearance.newValue));
+    terminal.options.theme = colors;
+    element('terminal-region').style.backgroundColor = colors.background;
+    element('empty-state').style.backgroundColor = colors.background;
+  }
+  if (changes.settings?.newValue) {
+    const saved = changes.settings.newValue as Partial<Settings>;
+    // Credentials are used on the next connection; do not drop an active session.
+    settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight) };
+    portInput.value = String(settings.port);
+    tokenInput.value = settings.token;
+    fontInput.value = String(settings.fontSize);
+    lineHeightInput.value = String(settings.lineHeight);
+    reconnectInput.checked = settings.autoReconnect;
+    terminal.options.fontSize = settings.fontSize;
+    terminal.options.lineHeight = settings.lineHeight;
+    resize();
+  }
+});
 async function init() {
   await initThemeControls(terminal);
   try {
     const stored = await chrome.storage.local.get('settings');
     if (stored.settings && typeof stored.settings === 'object') {
-      settings = { ...settings, ...(stored.settings as Partial<Settings>) };
+      const saved = stored.settings as Partial<Settings>;
+      settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true };
     }
   } catch { showNotice('Could not load saved settings.'); }
   portInput.value = String(settings.port);
   tokenInput.value = settings.token;
   fontInput.value = String(settings.fontSize);
+  lineHeightInput.value = String(settings.lineHeight);
   reconnectInput.checked = settings.autoReconnect;
   terminal.options.fontSize = settings.fontSize;
+  terminal.options.lineHeight = settings.lineHeight;
   setMode(settings.mode);
   resize();
   const requested = windowTarget(location.hash);

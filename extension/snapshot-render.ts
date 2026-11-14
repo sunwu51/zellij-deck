@@ -1,5 +1,7 @@
 import { Terminal, type IBufferCell } from '@xterm/xterm';
 import type { Palette } from './theme';
+import { useModernWidths } from './unicode';
+import { FONT_FAMILY } from './font';
 import { ansiColor, drawOrder, frameCells, rgbColor, type Snapshot, type SnapshotTab } from './snapshot';
 
 export type Cell = {
@@ -7,14 +9,15 @@ export type Cell = {
   bold?: boolean; italic?: boolean; dim?: boolean; underline?: boolean; strike?: boolean;
 };
 export type Grid = { cols: number; rows: number; cells: Cell[] };
-export const FONT_FAMILY = '"Side Shell Symbols", "Cascadia Code", Consolas, Menlo, monospace';
+export { FONT_FAMILY };
 
 /**
  * Zellij's dump re-joins soft-wrapped lines and trims blank rows. Replaying it into an
  * unopened xterm buffer of the pane's content size re-wraps it exactly as the pane shows it.
  */
 async function parsePane(content: string, cols: number, rows: number): Promise<Terminal> {
-  const terminal = new Terminal({ cols, rows, scrollback: 0, convertEol: true, allowProposedApi: false });
+  const terminal = new Terminal({ cols, rows, scrollback: 0, convertEol: true, allowProposedApi: true });
+  useModernWidths(terminal);
   await new Promise<void>(resolve => terminal.write(content, resolve));
   return terminal;
 }
