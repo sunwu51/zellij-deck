@@ -51,7 +51,7 @@
       <p class="hint">Watch is read-only. Interact attaches a terminal client. Other sessions keep running.</p>
     </div>
     <form id="create-form"><label for="new-name">Create a session</label><div class="session-row">
-      <input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}" required>
+      <input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{0,95}" required>
       <button type="submit">Create &amp; open</button></div><p class="hint">Starts a new workspace in its own terminal window.</p>
     </form>
   </section>
