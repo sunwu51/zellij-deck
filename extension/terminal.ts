@@ -1,22 +1,20 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { keyAction, controlCharacter, shiftEnterSequence, applyKittyKeyboard } from './keyboard';
-import { terminalColorOptions } from './theme';
+import { terminalColorOptions, selectedPalette, normalizeAppearance } from './theme';
 import { useModernWidths } from './unicode';
 import {
   FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT,
   migrateFontSize, lineHeightOrDefault,
 } from './font';
 import { initThemeControls } from './theme-controls';
-import { initWindowControls, openDashboard, windowTarget, openSessionWindow, attachedUrl } from './window-controls';
+import { initWindowControls, openDashboard, windowTarget, attachedUrl } from './window-controls';
 
 type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
 type Session = { name: string; exited: boolean; current: boolean };
 type Target = { session: string; mode: 'watch' | 'attach' | 'create' };
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-// The side panel is a launcher: it opens each session in its own window. A pop-out window
-// (view=window) is the terminal itself and connects in place.
-const inWindow = new URLSearchParams(location.hash.slice(1)).get('view') === 'window';
+// This page is only a dedicated terminal; the dashboard is the launcher.
 const settingsPanel = element('settings');
 const toggle = element<HTMLButtonElement>('settings-toggle');
 const portInput = element<HTMLInputElement>('port');
@@ -44,7 +42,7 @@ let refreshController: AbortController | undefined;
 // packaged fallback before xterm measures or draws its first terminal cells.
 let symbolFontFailed = false;
 try {
-  const faces = await document.fonts.load('13px "Side Shell Symbols"', '');
+  const faces = await document.fonts.load('13px "wshell Symbols"', '');
   symbolFontFailed = faces.length === 0;
 } catch { symbolFontFailed = true; }
 
@@ -95,7 +93,7 @@ function setMode(mode: 'watch' | 'attach') {
 }
 function setBusy(busy: boolean) {
   connectButton.hidden = false;
-  connectButton.textContent = !inWindow ? 'Open in window' : busy ? 'Switch' : 'Open session';
+  connectButton.textContent = busy ? 'Switch' : 'Open session';
   disconnectButton.hidden = !busy;
   if (!busy) {
     element('session-summary').textContent = 'Session controls';
@@ -254,7 +252,7 @@ async function refreshSessions(quiet = false) {
     }
     if (Array.from(sessionSelect.options).some(option => option.value === selected)) sessionSelect.value = selected;
     element('session-help').textContent = sessions.length
-      ? `${sessions.filter(session => !session.exited).length} running · Choose a session and open it${inWindow ? '' : ' in its own window'}. Other sessions keep running.`
+      ? `${sessions.filter(session => !session.exited).length} running · Choose a session and open it. Other sessions keep running.`
       : 'Bridge connected. Create a session below, or start one in your local Zellij terminal.';
     if (!quiet) showNotice();
     if (!target) status('Bridge connected · choose a session');
@@ -307,7 +305,7 @@ function detach() {
   ready = false;
   const old = socket;
   socket = undefined;
-  old?.close(1000, 'Sidebar detached.');
+  old?.close(1000, 'Terminal detached.');
   terminal.options.disableStdin = true;
   clearCtrlPrefix();
   updateKeyboardControls();
@@ -330,7 +328,7 @@ function connect(next: Target, retry = false) {
   status(`${retry ? 'Reconnecting' : 'Connecting'} · ${next.session}`, 'connecting');
   resize();
   let ws: WebSocket;
-  try { ws = new WebSocket(`ws://127.0.0.1:${settings.port}/terminal`, ['side-shell-v1', `pair.${settings.token}`]); }
+  try { ws = new WebSocket(`ws://127.0.0.1:${settings.port}/terminal`, ['wshell-v1', `pair.${settings.token}`]); }
   catch (error) { detach(); showNotice(String(error)); return; }
   socket = ws;
   let intentionalExit = false;
@@ -364,7 +362,7 @@ function connect(next: Target, retry = false) {
         // Never recreate a session automatically after the first successful connection.
         if (target?.mode === 'create') target = { ...target, mode: 'attach' };
         // drop a window's one-time create flag, so reloading it only attaches
-        if (inWindow && target) history.replaceState(null, '', attachedUrl(location.href, target));
+        if (target) history.replaceState(null, '', attachedUrl(location.href, target));
         terminal.options.disableStdin = next.mode === 'watch';
         updateKeyboardControls();
         element('empty-state').hidden = true;
@@ -420,16 +418,8 @@ toggle.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden));
 watchButton.addEventListener('click', () => setMode('watch'));
 attachButton.addEventListener('click', () => setMode('attach'));
 refreshButton.addEventListener('click', () => { void refreshSessions(); });
-async function openSession(next: Target) {
-  if (inWindow) return connect(next);
-  settings.session = next.session;
-  void chrome.storage.local.set({ settings });
-  try {
-    await openSessionWindow(next);
-    showNotice(`Opened ${next.session} (${next.mode === 'watch' ? 'Watch' : 'Interact'}) in a new window.`);
-  } catch (error) {
-    showNotice(error instanceof Error ? error.message : 'Could not open a terminal window.');
-  }
+function openSession(next: Target) {
+  connect(next);
 }
 connectButton.addEventListener('click', () => {
   if (!sessionSelect.value) { showNotice('Choose a session, or create a new one below.'); return; }
@@ -463,6 +453,28 @@ element('save-settings').addEventListener('click', async () => {
   await refreshSessions();
 });
 window.addEventListener('pagehide', detach);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.appearance) {
+    const colors = selectedPalette(normalizeAppearance(changes.appearance.newValue));
+    terminal.options.theme = colors;
+    element('terminal-region').style.backgroundColor = colors.background;
+    element('empty-state').style.backgroundColor = colors.background;
+  }
+  if (changes.settings?.newValue) {
+    const saved = changes.settings.newValue as Partial<Settings>;
+    // Credentials are used on the next connection; do not drop an active session.
+    settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight) };
+    portInput.value = String(settings.port);
+    tokenInput.value = settings.token;
+    fontInput.value = String(settings.fontSize);
+    lineHeightInput.value = String(settings.lineHeight);
+    reconnectInput.checked = settings.autoReconnect;
+    terminal.options.fontSize = settings.fontSize;
+    terminal.options.lineHeight = settings.lineHeight;
+    resize();
+  }
+});
 async function init() {
   await initThemeControls(terminal);
   try {
@@ -480,7 +492,6 @@ async function init() {
   terminal.options.fontSize = settings.fontSize;
   terminal.options.lineHeight = settings.lineHeight;
   setMode(settings.mode);
-  if (!inWindow) connectButton.textContent = 'Open in window';
   resize();
   const requested = windowTarget(location.hash);
   if (requested) {

@@ -13,7 +13,7 @@ export const MAX_LINE_HEIGHT = 1.6;
  * Fallbacks cover Latin text (Cascadia, Consolas, Menlo/SF Mono) and Chinese, so CJK text does not
  * fall to whatever the browser picks for the generic `monospace`. */
 export const FONT_FAMILY = [
-  '"Side Shell Symbols"', '"Cascadia Mono"', '"Cascadia Code"', 'Consolas', 'Menlo', '"SF Mono"',
+  '"wshell Symbols"', '"Cascadia Mono"', '"Cascadia Code"', 'Consolas', 'Menlo', '"SF Mono"',
   '"Microsoft YaHei UI"', '"Microsoft YaHei"', '"PingFang SC"', '"Noto Sans Mono CJK SC"', 'monospace',
 ].join(', ');
 

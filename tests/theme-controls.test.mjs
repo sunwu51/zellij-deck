@@ -98,3 +98,26 @@ test('theme controls preview, save live without credentials, reject bad imports,
     }
   }
 });
+
+test('theme controls can save from the dashboard without constructing a terminal', async () => {
+  const old = { document: globalThis.document, chrome: globalThis.chrome, Option: globalThis.Option };
+  const elements = new Map();
+  const get = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
+  let saved;
+  globalThis.document = { getElementById: get, createElement: () => new Element() };
+  globalThis.Option = class { constructor(text, value) { this.text = text; this.value = value; } };
+  globalThis.chrome = { storage: { local: { async get() { return {}; }, async set(value) { saved = value; } } } };
+  try {
+    await initThemeControls();
+    get('theme-preset').value = 'dracula';
+    get('theme-preset').dispatch('change');
+    get('theme-apply').dispatch('click');
+    await flush();
+    assert.equal(saved.appearance.preset, 'dracula');
+    assert.equal(elements.has('terminal-region'), false);
+  } finally {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+});

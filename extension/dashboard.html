@@ -4,19 +4,57 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Session Previews · Side Shell</title>
+  <title>wshell dashboard</title>
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
   <header class="header">
-    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Session previews</h1><span class="subtitle">EVERY ZELLIJ SESSION AT A GLANCE · READ-ONLY</span></div></div>
-    <div class="toolbar">
+    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>wshell</h1><span class="subtitle">LOCAL SESSIONS · LIVE PREVIEWS</span></div></div>
+    <div class="toolbar"><button id="settings-toggle" aria-expanded="false" aria-controls="settings">⚙ Settings</button>
       <label class="sr-only" for="filter">Filter sessions</label><input id="filter" type="search" placeholder="Filter sessions" autocomplete="off" spellcheck="false">
       <label class="sr-only" for="interval">Auto-refresh</label>
       <select id="interval" title="Auto-refresh interval"><option value="0">Auto-refresh off</option><option value="2000">Every 2s</option><option value="5000" selected>Every 5s</option><option value="15000">Every 15s</option></select>
       <button id="refresh" class="icon-button" title="Refresh now" aria-label="Refresh now">↻</button>
     </div>
   </header>
+  <section id="settings" class="settings" hidden aria-label="Bridge settings">
+    <section class="appearance" aria-labelledby="appearance-heading">
+      <div class="section-heading"><h2 id="appearance-heading">Terminal theme</h2><span class="badge">DEVICE LOCAL</span></div>
+      <label for="theme-preset">Preset</label>
+      <div class="session-row"><select id="theme-preset" disabled aria-describedby="theme-description"><option>Loading themes…</option></select><button id="theme-apply" disabled>Apply theme</button></div>
+      <p id="theme-description" class="hint">Mocha (Claude) maps bright blue to pink. Standard Mocha and Dracula keep their own palettes.</p>
+      <div id="theme-preview" aria-label="Terminal color preview"><div>$ <span id="theme-preview-pink">inline highlight</span> <span id="theme-preview-yellow">warning</span></div><div id="theme-swatches" aria-hidden="true"></div></div>
+      <details><summary>Import a custom palette</summary>
+        <p class="hint">Paste one Windows Terminal scheme or xterm palette object. Include background, foreground, and all 16 ANSI colors as #RRGGBB.</p>
+        <label for="theme-json" class="sr-only">Custom palette JSON</label><textarea id="theme-json" rows="5" maxlength="32768" spellcheck="false" placeholder='{"name":"My palette","background":"#1e1e2e",…}'></textarea>
+        <label for="theme-file">Or load a JSON file (max 32 KB)</label><input id="theme-file" type="file" accept=".json,application/json">
+        <button id="theme-import">Import &amp; apply</button>
+      </details>
+      <p id="theme-feedback" class="hint" role="status" aria-live="polite"></p>
+    </section>
+    <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
+    <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
+    <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
+    <div class="settings-row"><label for="font-size">Font size</label><input id="font-size" type="number" min="10" max="24" value="16"></div>
+    <div class="settings-row"><label for="line-height">Line height</label><input id="line-height" type="number" min="1" max="1.6" step="0.05" value="1.2"></div>
+    <label class="checkbox"><input id="auto-reconnect" type="checkbox" checked> Reconnect after a connection loss</label>
+    <button id="save-settings" class="primary">Save &amp; connect bridge</button>
+    <p class="hint">Start the local bridge with <code>npm run bridge</code>. Your token is saved on this device, not synced.</p>
+  </section>
+  <section class="launcher" aria-label="Session controls">
+    <div class="launcher-open">
+      <label for="session">Open a session</label>
+      <div class="session-row"><select id="session"><option value="">Choose a session</option></select>
+        <select id="mode" aria-label="Connection mode"><option value="watch">Watch</option><option value="attach">Interact</option></select>
+        <button id="connect" class="primary">Open in window</button>
+      </div>
+      <p class="hint">Watch is read-only. Interact attaches a terminal client. Other sessions keep running.</p>
+    </div>
+    <form id="create-form"><label for="new-name">Create a session</label><div class="session-row">
+      <input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}" required>
+      <button type="submit">Create &amp; open</button></div><p class="hint">Starts a new workspace in its own terminal window.</p>
+    </form>
+  </section>
   <div id="notice" role="status" hidden></div>
   <main>
     <div id="empty" class="empty" hidden></div>
@@ -31,10 +69,19 @@
     <div class="focus-header">
       <h2 id="focus-title"></h2>
       <div class="tabs" id="focus-tabs" role="group" aria-label="Tabs"></div>
-      <div class="focus-actions"><button data-mode="watch">Watch</button><button data-mode="attach">Interact</button><button id="focus-close" class="icon-button" autofocus aria-label="Close preview" title="Close (Esc)">✕</button></div>
+      <div class="focus-actions"><button data-mode="watch">Watch</button><button data-mode="attach">Interact</button><button id="focus-delete" class="danger">Delete</button><button id="focus-close" class="icon-button" autofocus aria-label="Close preview" title="Close (Esc)">✕</button></div>
     </div>
     <div class="focus-body"><canvas id="focus-canvas" role="img"></canvas></div>
     <p id="focus-meta" class="hint"></p>
+  </dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-description">
+    <form method="dialog">
+      <h2 id="delete-title">Delete session?</h2>
+      <p id="delete-description"></p>
+      <p class="hint">This stops all processes in the session and permanently removes its saved state. It cannot be undone.</p>
+      <p id="delete-error" class="error" role="alert" hidden></p>
+      <div class="delete-actions"><button id="delete-cancel" value="cancel" autofocus>Cancel</button><button id="delete-confirm" type="button" class="danger">Kill &amp; delete</button></div>
+    </form>
   </dialog>
   <script src="dashboard.js" type="module"></script>
 </body>

@@ -70,7 +70,7 @@ const fontModule = await import(`data:text/javascript;base64,${Buffer.from((awai
 test('font defaults match Windows Terminal, and the old saved default is migrated once', () => {
   const { DEFAULT_FONT_SIZE, FONT_FAMILY, migrateFontSize, lineHeightOrDefault } = fontModule;
   assert.equal(DEFAULT_FONT_SIZE, 16, '12 pt = 16 px');
-  assert.match(FONT_FAMILY, /^"Side Shell Symbols", "Cascadia Mono"/);
+  assert.match(FONT_FAMILY, /^"wshell Symbols", "Cascadia Mono"/);
   assert.match(FONT_FAMILY, /"Microsoft YaHei UI".*monospace$/, 'Chinese fallbacks come before the generic family');
   assert.equal(migrateFontSize({ fontSize: 13 }), 16, 'the old default is moved');
   assert.equal(migrateFontSize({ fontSize: 13, fontDefaultsV2: true }), 13, 'a size chosen after the migration is kept');

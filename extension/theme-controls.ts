@@ -4,7 +4,7 @@ import {
   normalizeAppearance, selectedPalette, type Appearance,
 } from './theme';
 
-export async function initThemeControls(terminal: Terminal) {
+export async function initThemeControls(terminal?: Terminal) {
   const get = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const select = get<HTMLSelectElement>('theme-preset');
   const apply = get<HTMLButtonElement>('theme-apply');
@@ -38,6 +38,7 @@ export async function initThemeControls(terminal: Terminal) {
     get('theme-swatches').replaceChildren(...swatches);
   }
   function updateTerminal() {
+    if (!terminal) return;
     const colors = selectedPalette(draft);
     terminal.options.theme = colors;
     // Include the terminal's outer gutter, which xterm itself does not paint.

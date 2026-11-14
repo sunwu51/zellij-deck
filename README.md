@@ -1,6 +1,6 @@
-# Side Shell · Zellij
+# wshell
 
-A Chrome side-panel extension that keeps a local Zellij terminal alongside the page you are browsing. It uses xterm.js, a loopback-only Node.js WebSocket bridge, and your existing Zellij installation.
+A Chrome extension for managing local Zellij sessions from a dashboard, with live previews and dedicated terminal windows. It uses xterm.js, a loopback-only Node.js WebSocket bridge, and your existing Zellij installation.
 
 ## Quick start (Windows and macOS)
 
@@ -33,11 +33,11 @@ The bridge prints its port and pairing token. Keep this terminal running.
 
 1. Open `chrome://extensions` and enable **Developer mode**.
 2. Click **Load unpacked** and choose this project's **dist** folder.
-3. Pin **Side Shell · Zellij**, then click its toolbar icon to open the sidebar. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
-4. Paste the bridge's pairing token into the sidebar settings and click **Save & connect bridge**. The default port is **17329**. This verifies access and loads sessions; it does not open a terminal yet.
-5. Choose a session and click **Open in window**. The side panel is a launcher: each session opens in its own resizable terminal window, because the panel is too narrow to work in. **Watch** is read-only; **Interact** attaches a normal Zellij client. **Create a session** also opens the new session in a window.
-6. To start a dedicated session for the sidebar, expand **Create a session**, enter a name, and click **Create**. You can create another while connected.
-7. To switch, choose another session and mode, then click **Switch**. The previous session keeps running. There is one visible terminal at a time, but multiple persistent sessions can run.
+3. Pin **wshell**, then click its toolbar icon to open the dashboard. Clicking again focuses the existing dashboard tab. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
+4. Open **Settings** at the top of the dashboard, paste the bridge's pairing token, and click **Save & connect bridge**. The default port is **17329**. This loads sessions without attaching a terminal.
+5. Use the dashboard's top controls or a session card to **Watch** (read-only) or **Interact** in a dedicated terminal window.
+6. To create a workspace, enter a name in **Create a session** and click **Create & open**.
+7. Use **Delete** on a running card, enlarged preview, or exited-session entry to permanently remove a session. Confirm **Kill & delete** to stop all its processes and remove its saved/resurrection state. This cannot be undone. Closing a terminal window or clicking **Detach** does not delete it.
 
 A **bridge** is the local transport service. A **session** is a persistent Zellij workspace with its own shells, panes, and tasks. Session listing uses authenticated HTTP; an opened terminal streams input/output over WebSocket. Saving bridge settings is separate from opening a workspace.
 
@@ -45,34 +45,32 @@ Existing sessions from the native Zellij installation on the machine running the
 
 ## What stays running?
 
-Closing the side panel, clicking **Detach**, or stopping the bridge closes only the attached Zellij client. The Zellij session server and its tasks continue running. Reopen the panel and reconnect to redraw the current session. Browser scrollback is not persisted; Zellij is responsible for session state.
+Closing the dashboard does not affect any terminal clients. Closing a terminal window, clicking **Detach**, or stopping the bridge closes only the attached Zellij client. The Zellij session server and its tasks continue running. Browser scrollback is not persisted; Zellij is responsible for session state.
 
-The panel automatically retries an interrupted connection up to ten times with capped exponential backoff. It does not automatically connect merely because you open the panel, and it does not reconnect after a deliberate detach or normal client exit.
-
-A closed sidebar cannot display output or show notifications. This MVP does not request background notification permissions or monitor terminal output while its UI is closed.
+Terminal windows automatically retry an interrupted connection up to ten times with capped exponential backoff. They do not reconnect after a deliberate detach or normal client exit. Only the explicit **Delete → Kill & delete** action terminates and removes a workspace.
 
 Watch mode uses the actual `zellij watch` command and also drops input at the bridge, rather than merely hiding the keyboard UI. Interactive attachment may change a shared session's layout or effective terminal dimensions; prefer **Watch** when monitoring another terminal. Existing session configuration still controls how Zellij renders itself.
 
 ## Fullscreen and pop-out windows
 
-Use **⛶** in the header to toggle fullscreen. If Chrome does not permit the side panel to enter document fullscreen, Side Shell opens a dedicated fullscreen extension window instead. In a pop-out, the same button enters/exits window fullscreen and restores its previous normal/maximized state. For document fullscreen, Escape also exits; for window fullscreen use the button or the OS/Chrome fullscreen controls.
+Use **⛶** in a terminal window's header to enter/exit fullscreen, restoring its previous normal/maximized state.
 
-Sessions opened from the side panel always get their own window. Inside a window, **Open session** switches that window in place. A window created by **Create a session** creates the session once; after it connects, its URL only attaches, so reloading it never re-creates or resurrects a session.
+Sessions opened from the dashboard always get their own window. Inside a window, **Open session** switches that window in place. A window created by **Create & open** creates the session once; after it connects, its URL only attaches, so reloading it never re-creates a deleted session.
 
 Use **↗** to open a resizable standalone terminal window. When a session is connected, the new window automatically attaches to that same session with the same Watch/Interact mode; it never implicitly creates or resurrects via `--create`. Pairing credentials are read from extension storage, not placed in the URL. Without a connected session, the new window opens the session picker.
 
-The original sidebar remains connected. Each view is a separate Zellij client: both can operate in Interact mode, so avoid simultaneous typing. Closing either view detaches only that client. Different viewport sizes may affect the shared Zellij layout. Themes are loaded from the device's saved settings when a window opens; an already-open window does not live-sync theme edits made in another window.
+Each window is a separate Zellij client: multiple windows can operate in Interact mode, so avoid simultaneous typing. Closing a view detaches only that client. Different viewport sizes may affect the shared Zellij layout. Theme, font size, and line-height edits from the dashboard apply to existing terminal windows without detaching them.
 
 ## Session previews
 
-Click **▦** in the side-panel header to open **Session previews** in a browser tab. If it is already open, that tab is focused. Like a browser automation dashboard, it shows a live thumbnail for every running Zellij session at once:
+Click the extension icon (or **▦** in a terminal window) to open the dashboard in a browser tab. If it is already open, that tab is focused. Like a browser automation dashboard, it shows a live thumbnail for every running Zellij session at once:
 
 - Each card renders the session's active tab as Zellij would show it: pane positions, frames, focused-pane highlight, visible floating panes, and ANSI/24-bit colors in your saved terminal theme.
 - Click a tab chip to preview another tab of that session. Click the thumbnail for a large view of the whole tab; Escape closes it.
-- **Watch** / **Interact** open that session in a pop-out terminal window. Exited sessions are listed separately and can be resurrected with Interact.
+- **Watch** / **Interact** open that session in a terminal window. **Delete** kills and permanently deletes it after confirmation. Exited sessions are listed separately, with **Resurrect** and **Delete** actions.
 - Auto-refresh defaults to every 5 seconds (off, 2s, 5s, or 15s). It pauses while the tab is hidden.
 
-Previews are strictly read-only and do not attach a Zellij client. The bridge reads layout with `zellij action list-tabs --json` / `list-panes --json` and screen text with `dump-screen --pane-id --ansi`, so capturing never changes a session's size, focus, or active tab. Before pane text leaves the bridge, it is reduced to printable text plus SGR color/style codes. At most six Zellij query processes run at once, and at most 48 panes are captured per session. Plugin panes (status bar, tab bar, sidebars) have no screen text to dump and appear as labeled placeholders. A session with no attached client is marked **DETACHED**: it is still running in the background (Zellij keeps its server process alive after the last client leaves), but no terminal window shows it. Such a session reports no active tab, so the first tab is shown. If the dashboard says the bridge is out of date, stop the bridge and run `npm run bridge` again; a bridge started before this feature cannot capture previews. Previews require a Zellij version with these actions (verified with 0.45.1); older versions show an upgrade message on the card.
+Preview capture is strictly read-only (management actions are explicit) and do not attach a Zellij client. The bridge reads layout with `zellij action list-tabs --json` / `list-panes --json` and screen text with `dump-screen --pane-id --ansi`, so capturing never changes a session's size, focus, or active tab. Before pane text leaves the bridge, it is reduced to printable text plus SGR color/style codes. At most six Zellij query processes run at once, and at most 48 panes are captured per session. Plugin panes (status bar, tab bar, sidebars) have no screen text to dump and appear as labeled placeholders. A session with no attached client is marked **DETACHED**: it is still running in the background (Zellij keeps its server process alive after the last client leaves), but no terminal window shows it. Such a session reports no active tab, so the first tab is shown. If the dashboard says the bridge is out of date, stop the bridge and run `npm run bridge` again; a bridge started before this feature cannot capture previews. Previews require a Zellij version with these actions (verified with 0.45.1); older versions show an upgrade message on the card.
 
 ## MCP server for AI agents
 
@@ -82,13 +80,13 @@ The bridge also serves a [Model Context Protocol](https://modelcontextprotocol.i
 http://127.0.0.1:17329/mcp        Authorization: Bearer <pairing token>
 ```
 
-Claude Code example: `claude mcp add --transport http side-shell http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; the sidebar and dashboard use the same token.
+Claude Code example: `claude mcp add --transport http wshell http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; terminal windows and the dashboard use the same token.
 
-Side Shell does not replace an agent's built-in shell tool. Its server instructions and the `pane_open` description tell the agent to use a pane for blocking or long-running work (dev servers, watchers, long builds and tests, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so you can watch it in the dashboard. Simple commands that finish in seconds stay with the agent's own shell tool.
+wshell does not replace an agent's built-in shell tool. Its server instructions and the `pane_open` description tell the agent to use a pane for blocking or long-running work (dev servers, watchers, long builds and tests, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so you can watch it in the dashboard. Simple commands that finish in seconds stay with the agent's own shell tool.
 
 ### Isolation: one MCP session, one Zellij session
 
-The standard `Mcp-Session-Id` is the identity. `initialize` issues a session id, and **the Zellij session an MCP session creates belongs to it**. Other MCP sessions cannot list, read, type into, close, or adopt its panes (they get "not found", which does not reveal that they exist), and your own sessions opened in the side panel are invisible to agents. The id travels in an HTTP header managed by the client, so a model cannot forge another conversation's identity. TabManager gives every conversation its own MCP session; most other clients use one per process.
+The standard `Mcp-Session-Id` is the identity. `initialize` issues a session id, and **the Zellij session an MCP session creates belongs to it**. Other MCP sessions cannot list, read, type into, close, or adopt its panes (they get "not found", which does not reveal that they exist), and your own sessions opened from the dashboard are invisible to agents. The id travels in an HTTP header managed by the client, so a model cannot forge another conversation's identity. TabManager gives every conversation its own MCP session; most other clients use one per process.
 
 This prevents accidental cross-talk. It is not an OS-level boundary: every shell runs as you, so a command inside one agent terminal could still run `zellij kill-session` on another.
 
@@ -108,7 +106,7 @@ There are no sessions, tabs, or layouts for an agent to manage. Your MCP session
 | Waiting | `pane_wait` until a pattern appears or output goes idle; always returns within 45 s, or earlier with `closed` if the pane is closed meanwhile (later calls say the pane "was closed" rather than "not found") |
 | Session | `session_kill` (end all your panes; the next `pane_open` starts fresh), `session_adopt` (take over an abandoned session after resuming a conversation) |
 
-Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the side panel; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. Panes report no exit code; an agent that needs one prints it (for example by appending `; echo EXIT=$?`).
+Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the dashboard; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. Panes report no exit code; an agent that needs one prints it (for example by appending `; echo EXIT=$?`).
 
 To let TabManager connect, add its extension ID to `WEBSHELL_EXTENSION_ID` (comma-separated) if you pin origins. Native clients send no `Origin`; browser requests with any other origin are rejected, so web pages cannot reach the endpoint.
 
@@ -118,7 +116,7 @@ Open **Settings (⚙) → Terminal theme**. Choose a preset, inspect the color p
 
 Presets:
 - **Catppuccin Mocha**: standard Mocha ANSI colors, including mauve magenta.
-- **Catppuccin Mocha (Claude)**: preserves the previous sidebar palette and the customized WT scheme: pink magenta and bright blue mapped to `#FF79C6`. This is the default when there is no saved preference.
+- **Catppuccin Mocha (Claude)**: preserves the original terminal palette and the customized WT scheme: pink magenta and bright blue mapped to `#FF79C6`. This is the default when there is no saved preference.
 - **Dracula**: dark purple background with Dracula's pink, purple, green, and yellow ANSI palette.
 
 For a custom palette, expand **Import a custom palette**, paste a single JSON object or load a `.json` file, then click **Import & apply**. File loading alone does not apply changes. One custom palette is retained; importing another replaces it. Switching presets keeps the custom palette available. Preferences are saved in device-local extension storage, not Chrome Sync. There is no automatic inheritance from WT/iTerm.
@@ -152,7 +150,7 @@ In the **Ctrl key** dropdown, choose **Custom…**, enter one character, then cl
 
 The prefix is scoped to the focused xterm terminal; settings fields keep normal editing behavior. It maps A–Z to standard terminal control bytes. It is not a global shortcut remapping and does not change Zellij's configuration. The toolbar returns focus to the terminal after sending a key, so subsequent Zellij mode keys can be typed normally.
 
-Chrome reserves shortcuts such as Ctrl+T, Ctrl+W, Ctrl+N, and Ctrl+Tab before a side-panel page can reliably handle them. `preventDefault()` and xterm handlers cannot guarantee reclaiming those shortcuts; the prefix/toolbar avoids the conflict rather than trying to override Chrome. Other Ctrl keys continue through xterm's standard handling. A native terminal remains preferable when exact desktop keyboard behavior is required.
+Chrome reserves shortcuts such as Ctrl+T, Ctrl+W, Ctrl+N, and Ctrl+Tab before an extension page can reliably handle them. `preventDefault()` and xterm handlers cannot guarantee reclaiming those shortcuts; the prefix/toolbar avoids the conflict rather than trying to override Chrome. Other Ctrl keys continue through xterm's standard handling. A native terminal remains preferable when exact desktop keyboard behavior is required.
 
 Paste uses Chrome's real clipboard paste event and xterm's bracketed-paste behavior, rather than sending the literal Ctrl+V byte. This supports **text only**. Clipboard images/files do not pass through the terminal text stream; applications that support image paste in a native terminal may need a separate image-transfer integration here. No background clipboard reading is performed. The extension requests `clipboardWrite` for explicit Copy actions.
 
@@ -162,11 +160,11 @@ Optional bridge environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `WEBSHELL_PORT` | `17329` | Loopback listening port (1024–65535). Also set this in sidebar settings. |
+| `WEBSHELL_PORT` | `17329` | Loopback listening port (1024–65535). Also set this in dashboard settings. |
 | `ZELLIJ_PATH` | Zellij on PATH | Absolute executable path if discovery fails. |
 | `WEBSHELL_CWD` | Your home directory | Working directory for Zellij clients/new sessions. |
 | `WEBSHELL_STATE_DIR` | This project's `.bridge` directory | Optional location for the pairing token. |
-| `WEBSHELL_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to specific installed extension IDs (comma-separated, e.g. Side Shell and TabManager). Recommended for a hardened local setup. |
+| `WEBSHELL_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to specific installed extension IDs (comma-separated, e.g. wshell and TabManager). Recommended for a hardened local setup. |
 | `WEBSHELL_MCP_TTL_HOURS` | `24` | Idle lifetime of an MCP session before its terminals are cleaned up (1–720). |
 | `WEBSHELL_TOKEN` | Generated random token | Override the pairing token. Use 32–256 letters, numbers, underscores, or hyphens. |
 
@@ -231,14 +229,14 @@ npm run build
 npm run test:integration
 ```
 
-`test:integration` starts a bridge on a temporary port, verifies authentication/origin restrictions, creates a uniquely named disposable Zellij session, attaches through a native PTY, checks that detach preserves the session, and reconnects with a read-only watcher. It terminates only its own test session afterward; an exited test-session entry may remain in Zellij's session history. It does not manipulate existing sessions.
+`test:integration` starts a bridge on a temporary port, verifies authentication/origin restrictions, creates a uniquely named disposable Zellij session, attaches through a native PTY, checks that detach preserves the session, and reconnects with a read-only watcher. It tests authenticated kill-and-delete for running and exited sessions, and cleans up only its own disposable sessions. It does not manipulate existing sessions.
 
-After source changes, rebuild and click **Reload** for the extension in `chrome://extensions`. Reopen the side panel.
+After source changes, rebuild and click **Reload** for the extension in `chrome://extensions`. Click the wshell icon to reopen the dashboard; restart the bridge to enable session deletion.
 
 Project layout:
 
 ```text
-extension/          Manifest V3 side panel, xterm.js UI, session-preview dashboard, service worker
+extension/          Manifest V3 dashboard, xterm.js terminal windows, service worker
 bridge/             Authenticated localhost HTTP/WebSocket to PTY bridge, plus bridge/mcp/ (MCP server)
 scripts/build.mjs   Local extension bundling
 tests/              Protocol unit tests and native Zellij integration smoke test

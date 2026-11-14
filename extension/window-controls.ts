@@ -28,10 +28,10 @@ export function windowTarget(hash: string): WindowTarget | undefined {
 export function attachedUrl(href: string, target: WindowTarget): string {
   return popoutUrl(href.split('#')[0], { session: target.session, mode: target.mode === 'watch' ? 'watch' : 'attach' });
 }
-/** Open a session in its own terminal window (the side panel is too narrow to work in). */
+/** Open a session in its own terminal window (launched from the dashboard). */
 export async function openSessionWindow(target: WindowTarget): Promise<void> {
   await chrome.windows.create({
-    url: popoutUrl(chrome.runtime.getURL('sidepanel.html'), target, { create: true }),
+    url: popoutUrl(chrome.runtime.getURL('terminal.html'), target, { create: true }),
     type: 'popup', ...WINDOW_SIZE, focused: true,
   });
 }
@@ -44,7 +44,7 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
   let busy = false;
   async function openWindow(full = false) {
     const created = await chrome.windows.create({
-      url: popoutUrl(chrome.runtime.getURL('sidepanel.html'), getTarget()),
+      url: popoutUrl(chrome.runtime.getURL('terminal.html'), getTarget()),
       type: 'popup', ...WINDOW_SIZE, focused: true,
     });
     if (full && created?.id !== undefined) await chrome.windows.update(created.id, { state: 'fullscreen' });
@@ -55,7 +55,7 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
       try { active = (await chrome.windows.getCurrent()).state === 'fullscreen'; } catch {}
     }
     fullscreen.textContent = active ? '⤡' : '⛶';
-    fullscreen.title = active ? 'Exit fullscreen' : 'Fullscreen (opens a window if the sidebar cannot enter fullscreen)';
+    fullscreen.title = active ? 'Exit fullscreen' : 'Fullscreen';
     fullscreen.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
     fullscreen.setAttribute('aria-pressed', String(active));
     requestAnimationFrame(resize);
@@ -82,7 +82,7 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
       } else if (document.fullscreenElement) await document.exitFullscreen();
       else {
         try {
-          if (!document.fullscreenEnabled) throw new Error('Fullscreen unavailable in side panel');
+          if (!document.fullscreenEnabled) throw new Error('Fullscreen unavailable');
           await document.documentElement.requestFullscreen();
         } catch { await openWindow(true); }
       }

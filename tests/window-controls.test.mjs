@@ -5,8 +5,8 @@ import { transform } from 'esbuild';
 
 const source = await readFile(new URL('../extension/window-controls.ts', import.meta.url), 'utf8');
 const { code } = await transform(source, { loader: 'ts', format: 'esm' });
-const { popoutUrl, windowTarget, initWindowControls } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
-const base = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/sidepanel.html';
+const { popoutUrl, windowTarget, initWindowControls, openDashboard } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const base = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/terminal.html';
 
 test('popout transfers only session/mode and never implicitly creates sessions', () => {
   const url = popoutUrl(base, { session: 'dev', mode: 'create', token: 'must-not-leak' });
@@ -108,4 +108,31 @@ test('an explicit Create opens a window that creates once, then only attaches', 
   assert.deepEqual(windowTarget(new URL(afterConnect).hash), { session: 'dev', mode: 'attach' }, 'once connected, a reload only attaches');
   assert.equal(new URL(afterConnect).pathname, new URL(base).pathname);
   assert.equal(windowTarget('#view=window&session=dev&mode=watch&new=1')?.mode, 'watch', 'new=1 never turns Watch into Create');
+});
+
+test('toolbar dashboard entry focuses an existing tab or creates one without side-panel permission', async () => {
+  const oldChrome = globalThis.chrome;
+  const events = [];
+  let contexts = [];
+  const url = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/dashboard.html';
+  globalThis.chrome = {
+    runtime: { getURL: () => url, ContextType: { TAB: 'TAB' }, async getContexts() { return contexts; } },
+    tabs: { async create(options) { events.push(['create', options]); }, async update(id, options) { events.push(['tab', id, options]); } },
+    windows: { async update(id, options) { events.push(['window', id, options]); } },
+  };
+  try {
+    await openDashboard();
+    assert.deepEqual(events, [['create', { url }]]);
+    events.length = 0;
+    contexts = [{ tabId: 12, windowId: 7 }];
+    await openDashboard();
+    assert.deepEqual(events, [['tab', 12, { active: true }], ['window', 7, { focused: true }]]);
+    const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+    assert.equal(manifest.name, 'wshell');
+    assert.equal(manifest.side_panel, undefined);
+    assert.equal(manifest.permissions.includes('sidePanel'), false);
+  } finally {
+    if (oldChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = oldChrome;
+  }
 });

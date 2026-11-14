@@ -1,6 +1,6 @@
 @import './xterm.css';
 @font-face {
-  font-family:'Side Shell Symbols';
+  font-family:'wshell Symbols';
   src:url('./fonts/nerd-fonts-v3.4.0/SymbolsNerdFontMono-Regular.ttf') format('truetype');
   font-style:normal;
   font-weight:100 900;
