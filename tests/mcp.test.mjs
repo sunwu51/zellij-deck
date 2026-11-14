@@ -9,7 +9,6 @@ import {
 } from '../bridge/mcp/text.mjs';
 import { McpSessionStore, STARTUP_GRACE_MS } from '../bridge/mcp/store.mjs';
 import { createMcpHandler } from '../bridge/mcp/handler.mjs';
-import { JobManager, shellCommand } from '../bridge/mcp/jobs.mjs';
 import { ToolError, createTools } from '../bridge/mcp/tools.mjs';
 
 const HOUR = 3_600_000;
@@ -216,42 +215,6 @@ test('expired sessions are swept and their terminals released', async () => {
   } finally { handler.close(); }
 });
 
-test('exec jobs keep stdout and stderr apart with exit codes', async () => {
-  const jobs = new JobManager({ cwd: process.cwd(), env: process.env });
-  const job = jobs.start('owner', { argv: [process.execPath, '-e', 'console.log("o1\\no2"); console.error("e1"); process.exit(4)'] });
-  assert.equal(await jobs.wait(job, 15000), true);
-  const summary = jobs.summary(job);
-  assert.equal(summary.status, 'exited');
-  assert.equal(summary.exit_code, 4);
-  assert.equal(summary.stdout.text, 'o1\no2');
-  assert.equal(summary.stderr.text, 'e1');
-  assert.equal(jobs.get('someone-else', job.id), undefined, 'Jobs are visible only to their owner');
-  assert.throws(() => jobs.start('owner', {}), /command .* or argv/);
-});
-
-test('job input, background waits, and kill', async () => {
-  const jobs = new JobManager({ cwd: process.cwd(), env: process.env });
-  const echo = jobs.start('o', { argv: [process.execPath, '-e', 'process.stdin.pipe(process.stdout)'], stdin: 'piped-in' });
-  await jobs.wait(echo, 15000);
-  assert.equal(jobs.summary(echo).stdout.text, 'piped-in');
-  const slow = jobs.start('o', { argv: [process.execPath, '-e', 'setTimeout(() => {}, 60000)'] });
-  assert.equal(await jobs.wait(slow, 200), false);
-  assert.equal(jobs.summary(slow).status, 'running');
-  assert.equal(jobs.kill(slow), true);
-  assert.equal(await jobs.wait(slow, 10000), true);
-  assert.equal(jobs.summary(slow).status, 'killed');
-  jobs.dropOwner('o');
-  assert.equal(jobs.list('o').length, 0);
-});
-
-test('shell commands use PowerShell with UTF-8 output on Windows and a POSIX shell elsewhere', () => {
-  const [exe, args] = shellCommand('echo hi', { platform: 'win32', powershell: 'pwsh.exe' });
-  assert.equal(exe, 'pwsh.exe');
-  assert.match(args.at(-1), /UTF8.*echo hi$/);
-  assert.deepEqual(shellCommand('echo hi', { platform: 'darwin', env: { SHELL: '/bin/zsh' } }), ['/bin/zsh', ['-c', 'echo hi']]);
-  assert.deepEqual(shellCommand('echo hi', { platform: 'linux', env: { SHELL: 'zsh; rm -rf /' } }), ['/bin/sh', ['-c', 'echo hi']]);
-});
-
 // A scripted Zellij: one session of terminal panes, each in its own tab. Typing appends to the
 // prompt line; Enter prints "result:42" and a new prompt.
 function fakeZellij({ session = 'ag-1' } = {}) {
@@ -298,7 +261,7 @@ function toolsWithFake({ session = 'ag-1', now } = {}) {
   const owner = store.create({ name: 'Claude Code' });
   const zellij = fakeZellij({ session });
   if (session) store.own(session, owner, { panes: [0] });
-  return { tools: createTools({ store, zellij, jobs: { list: () => [], dropOwner() {} }, ...(now ? { now } : {}) }), zellij, store, owner };
+  return { tools: createTools({ store, zellij, ...(now ? { now } : {}) }), zellij, store, owner };
 }
 
 test('pane_wait after pane_type matches output that already appeared, but not the echoed command', async () => {

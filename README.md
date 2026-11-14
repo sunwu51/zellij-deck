@@ -74,7 +74,7 @@ Previews are strictly read-only and do not attach a Zellij client. The bridge re
 
 ## MCP server for AI agents
 
-The bridge also serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so agents (TabManager, Claude Code, Codex, any MCP client) can open terminals, type into them, read their output, and run commands:
+The bridge also serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so agents (TabManager, Claude Code, Codex, any MCP client) can run commands in terminals you can watch live, type into them, and read their output:
 
 ```text
 http://127.0.0.1:17329/mcp        Authorization: Bearer <pairing token>
@@ -82,15 +82,17 @@ http://127.0.0.1:17329/mcp        Authorization: Bearer <pairing token>
 
 Claude Code example: `claude mcp add --transport http side-shell http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; the sidebar and dashboard use the same token.
 
+Side Shell does not replace an agent's built-in shell tool. Its server instructions and the `pane_open` description tell the agent to use a pane for blocking or long-running work (dev servers, watchers, long builds and tests, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so you can watch it in the dashboard. Simple commands that finish in seconds stay with the agent's own shell tool.
+
 ### Isolation: one MCP session, one Zellij session
 
-The standard `Mcp-Session-Id` is the identity. `initialize` issues a session id, and **the Zellij session and every job an MCP session creates belong to it**. Other MCP sessions cannot list, read, type into, close, or adopt its panes (they get "not found", which does not reveal that they exist), and your own sessions opened in the side panel are invisible to agents. The id travels in an HTTP header managed by the client, so a model cannot forge another conversation's identity. TabManager gives every conversation its own MCP session; most other clients use one per process.
+The standard `Mcp-Session-Id` is the identity. `initialize` issues a session id, and **the Zellij session an MCP session creates belongs to it**. Other MCP sessions cannot list, read, type into, close, or adopt its panes (they get "not found", which does not reveal that they exist), and your own sessions opened in the side panel are invisible to agents. The id travels in an HTTP header managed by the client, so a model cannot forge another conversation's identity. TabManager gives every conversation its own MCP session; most other clients use one per process.
 
 This prevents accidental cross-talk. It is not an OS-level boundary: every shell runs as you, so a command inside one agent terminal could still run `zellij kill-session` on another.
 
 ### Lifetime and cleanup
 
-An MCP session lasts 24 hours from its last request (every request renews it; change with `WEBSHELL_MCP_TTL_HOURS`, 1–720). A client that never sends `DELETE` therefore cannot leak terminals: once a session is idle past the TTL, the bridge kills its Zellij sessions and jobs. `DELETE /mcp` with the session header ends it immediately. A bridge restart keeps sessions (`.bridge/mcp-sessions.json`, which stores no token) and grants a one-hour grace period, so downtime alone does not expire them. Rotating the pairing token invalidates old ids; their terminals are cleaned up one TTL later. A client that resumes with a new session id (for example `claude --resume`) can take over an abandoned terminal with `session_adopt` once its previous owner has been idle for two hours.
+An MCP session lasts 24 hours from its last request (every request renews it; change with `WEBSHELL_MCP_TTL_HOURS`, 1–720). A client that never sends `DELETE` therefore cannot leak terminals: once a session is idle past the TTL, the bridge kills its Zellij sessions. `DELETE /mcp` with the session header ends it immediately. A bridge restart keeps sessions (`.bridge/mcp-sessions.json`, which stores no token) and grants a one-hour grace period, so downtime alone does not expire them. Rotating the pairing token invalidates old ids; their terminals are cleaned up one TTL later. A client that resumes with a new session id (for example `claude --resume`) can take over an abandoned terminal with `session_adopt` once its previous owner has been idle for two hours.
 
 ### Tools
 
@@ -98,14 +100,13 @@ There are no sessions, tabs, or layouts for an agent to manage. Your MCP session
 
 | Group | Tools |
 | --- | --- |
-| Panes | `pane_open` (always a shell; optional `command` is typed into it and run, optional `name`, `cwd`). When a command finishes the pane is simply back at its prompt and stays usable. If the shell itself exits (for example you typed `exit`), Zellij closes the pane and its tab, `pane_list` (panes and your exec jobs), `pane_close` (closing the last pane ends your session; the next `pane_open` starts a new one) |
+| Panes | `pane_open` (always a shell; optional `command` is typed into it and run, optional `name`, `cwd`). When a command finishes the pane is simply back at its prompt and stays usable. If the shell itself exits (for example you typed `exit`), Zellij closes the pane and its tab, `pane_list`, `pane_close` (closing the last pane ends your session; the next `pane_open` starts a new one) |
 | Input | `pane_type` (literal text, optional Enter, bracketed paste for multiple lines), `pane_keys` (`Enter`, `Esc`, `Up`/`Down`, `Ctrl c`, `F5`, ...), `pane_mouse` (click, double/right click, wheel scroll at a row and column; only for programs that enabled mouse tracking). Each returns `offset`, the pane's line count just before the input |
 | Output | `pane_read` (plain-text lines by `tail`, or `offset`/`limit`, with `total_lines`/`next_offset`; optional regex `pattern`), `pane_screen` (what the pane shows now, plus the cursor) |
 | Waiting | `pane_wait` until a pattern appears or output goes idle; always returns within 45 s, or earlier with `closed` if the pane is closed meanwhile (later calls say the pane "was closed" rather than "not found") |
-| Commands | `exec` (separate stdout/stderr, exit code, working directory, stdin; continues as a background job past its timeout), `job_output` (paged by line), `job_wait`, `job_kill` |
 | Session | `session_kill` (end all your panes; the next `pane_open` starts fresh), `session_adopt` (take over an abandoned session after resuming a conversation) |
 
-Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the side panel; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. A job (`exec`) is a process the bridge starts itself, outside any pane, which is why it has separate stdout/stderr; commands typed into a pane have no job id.
+Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the side panel; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. Panes report no exit code; an agent that needs one prints it (for example by appending `; echo EXIT=$?`).
 
 To let TabManager connect, add its extension ID to `WEBSHELL_EXTENSION_ID` (comma-separated) if you pin origins. Native clients send no `Origin`; browser requests with any other origin are rejected, so web pages cannot reach the endpoint.
 

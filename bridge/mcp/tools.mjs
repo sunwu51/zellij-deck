@@ -16,11 +16,12 @@ const POLL_MS = 400;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export const SERVER_INSTRUCTIONS = [
-  'Side Shell gives you private terminals ("panes") on the user\'s computer, backed by Zellij. Each pane runs in its own full-size tab, so there are no splits or layouts to manage.',
+  'Side Shell is a terminal-multiplexer command runner the user can watch: each command runs in a terminal ("pane") on the user\'s computer, backed by Zellij, and the user can follow, scroll, and take over every pane live from the Side Shell dashboard.',
+  'When to use it: prefer panes for blocking or long-running work (dev servers, watchers, long builds and test suites, anything likely to take more than about 60 seconds), and for REPLs and TUIs, so the user can see progress and step in. Simple shell commands that finish in a few seconds (ls, git status, cat, grep, short scripts) do not need a pane; run them with your usual shell tool.',
+  'Each pane runs in its own full-size tab, so there are no splits or layouts to manage.',
   'Isolation: your MCP session (Mcp-Session-Id) has its own set of panes. The user\'s sessions and other agents\' panes are invisible to you.',
-  'Interactive work: pane_open (a shell; pass command to run something right away), then pane_type (submit: true), pane_wait (pattern or idle), and pane_read (offset from the input call, or tail) or pane_screen for TUIs. A pane is always a shell: when a program finishes you are back at an idle prompt in the same pane and can keep typing. Use exec instead when you need a command\'s exit code. Use pane_keys for Enter, Esc, arrows, Ctrl combinations and menu navigation, and pane_mouse when a TUI needs a click or wheel scroll. With several panes open, pass pane every time.',
-  'One-shot commands that need an exit code and separate stdout/stderr: exec. It runs outside Zellij; if it is still running when timeout_s elapses it continues as a background job (job_wait, job_output, job_kill).',
-  `Every call returns within about ${MAX_WAIT_SECONDS} seconds; long work keeps running, so poll with pane_wait or job_wait.`,
+  'Workflow: pane_open (a shell; pass command to run something right away), then pane_wait (pattern or idle) and pane_read (offset from the input call, or tail), or pane_screen for TUIs. A pane is always a shell: when a program finishes you are back at an idle prompt in the same pane and can run more with pane_type (submit: true). Panes report no exit code; when you need one, print it (append "; echo EXIT=$?" in POSIX shells, or "; echo EXIT=$LASTEXITCODE" in PowerShell). Use pane_keys for Enter, Esc, arrows, Ctrl combinations and menu navigation, and pane_mouse when a TUI needs a click or wheel scroll. With several panes open, pass pane every time.',
+  `Every call returns within about ${MAX_WAIT_SECONDS} seconds; long work keeps running in its pane, so poll with pane_wait.`,
   'Read output incrementally: the input tools return offset (the pane\'s line count just before your input); pane_read with that offset returns what the input produced.',
 ].join('\n');
 
@@ -52,7 +53,7 @@ function slug(value, max) {
 }
 const PANE = { type: 'string', description: 'Pane id from pane_open or pane_list, such as "terminal_3". Optional only while exactly one pane is open.' };
 
-export function createTools({ store, zellij, jobs }) {
+export function createTools({ store, zellij }) {
   const locks = new Map();
   // Line count of each pane at the moment input was last sent to it. pane_wait matches only
   // lines after this mark by default, so "type, then wait" cannot race the command's output
@@ -177,7 +178,7 @@ export function createTools({ store, zellij, jobs }) {
   const tools = [
     {
       name: 'pane_open',
-      description: 'Open a new pane: a shell in its own full-size tab. With command, that command line is typed into the shell and run immediately (in the shell\'s own syntax: PowerShell on Windows), so when the program finishes the pane is back at an idle prompt and stays usable; it never freezes on a finished program. Use panes for servers, long builds, REPLs and TUIs that you or the user may want to watch or steer; use exec for one-off commands that need an exit code. A program that never ends keeps running until you stop it with pane_keys ["Ctrl c"] or close the pane. Your first pane_open also creates your private Zellij session, visible in the Side Shell dashboard. Returns the pane id for the other pane_* tools, and, with command, the offset to pass to pane_read.',
+      description: 'Open a new pane, a shell in its own full-size tab that the user can watch live in the Side Shell dashboard. Prefer it for blocking or long-running commands (dev servers, watchers, long builds or test runs, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so the user can see progress and step in; simple commands that finish in a few seconds do not need a pane. With command, that command line is typed into the shell and run immediately (in the shell\'s own syntax: PowerShell on Windows), so when the program finishes the pane is back at an idle prompt and stays usable; it never freezes on a finished program. A program that never ends keeps running until you stop it with pane_keys ["Ctrl c"] or close the pane. Panes report no exit code; print one if you need it (e.g. append "; echo EXIT=$?"). Your first pane_open also creates your private Zellij session. Returns the pane id for the other pane_* tools, and, with command, the offset to pass to pane_read.',
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         command: { type: 'string', description: 'Command line to run in the new shell, e.g. "npm run dev". Omit for an idle shell.' },
@@ -224,7 +225,7 @@ export function createTools({ store, zellij, jobs }) {
     },
     {
       name: 'pane_list',
-      description: 'List your open panes (name, title, size) and your exec jobs. With include_orphaned, also list terminal sessions abandoned by ended or long-idle MCP sessions, which session_adopt can take over.',
+      description: 'List your open panes (name, title, size). With include_orphaned, also list terminal sessions abandoned by ended or long-idle MCP sessions, which session_adopt can take over.',
       annotations: { readOnlyHint: true, openWorldHint: false },
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         include_orphaned: { type: 'boolean', description: 'Also list adoptable orphaned agent sessions.' },
@@ -235,10 +236,6 @@ export function createTools({ store, zellij, jobs }) {
         const note = takeLostNote(owner);
         const result = {
           panes: (ctx?.panes ?? []).map(paneInfo),
-          jobs: jobs.list(owner).map(job => ({
-            job_id: job.id, status: job.status, exit_code: job.exitCode, command: job.command.slice(0, 200),
-            duration_ms: (job.ended ?? Date.now()) - job.started,
-          })),
           ...(note ? { note } : {}),
         };
         if (wantOrphans) {
@@ -456,7 +453,7 @@ export function createTools({ store, zellij, jobs }) {
     },
     {
       name: 'session_kill',
-      description: 'End all of your panes and your Zellij session, killing every process in them. The next pane_open starts a fresh session. Exec jobs are not affected.',
+      description: 'End all of your panes and your Zellij session, killing every process in them. The next pane_open starts a fresh session.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       async run(args, { owner }) {
@@ -486,80 +483,6 @@ export function createTools({ store, zellij, jobs }) {
         return { adopted: name, panes: (store.ownership(name)?.panes ?? []).map(id => `terminal_${id}`) };
       },
     },
-    {
-      name: 'exec',
-      description: `Run a command outside Zellij and return its exit code with separate stdout and stderr (last 100 lines of each; page with job_output). command runs through the platform shell (PowerShell on Windows, $SHELL/sh elsewhere); argv runs a program directly. If it is still running after timeout_s (default 30, max ${MAX_WAIT_SECONDS}) it keeps running as a background job: use job_wait, job_output, or job_kill.`,
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-      inputSchema: { type: 'object', additionalProperties: false, properties: {
-        command: { type: 'string', description: 'Shell command string.' },
-        argv: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'Program and arguments, run without a shell.' },
-        cwd: { type: 'string', description: 'Absolute working directory.' },
-        stdin: { type: 'string', description: 'Text written to the process\'s standard input.' },
-        timeout_s: { type: 'integer', minimum: 0, maximum: MAX_WAIT_SECONDS, description: 'Seconds to wait before returning; 0 returns immediately with a job id.' },
-      } },
-      async run(args, { owner, signal }) {
-        let job, wait;
-        try {
-          wait = intInRange(args.timeout_s, 0, MAX_WAIT_SECONDS, 30) * 1000;
-          if (args.stdin !== undefined) text(args.stdin, 'stdin', 1024 * 1024);
-          job = jobs.start(owner, { command: args.command, argv: args.argv, cwd: await directory(args.cwd), stdin: args.stdin });
-        } catch (error) { throw new ToolError(error.message); }
-        await jobs.wait(job, wait, signal);
-        return jobs.summary(job);
-      },
-    },
-    {
-      name: 'job_output',
-      description: 'Page through a job\'s stdout or stderr by line: tail for the latest lines, or offset/limit. Returns total_lines and next_offset.',
-      annotations: { readOnlyHint: true, openWorldHint: false },
-      inputSchema: { type: 'object', additionalProperties: false, required: ['job_id'], properties: {
-        job_id: { type: 'string' },
-        stream: { type: 'string', enum: ['stdout', 'stderr'], description: 'Default stdout.' },
-        tail: { type: 'integer', minimum: 1, maximum: 2000 },
-        offset: { type: 'integer', minimum: 0 },
-        limit: { type: 'integer', minimum: 1, maximum: 2000 },
-      } },
-      async run(args, { owner }) {
-        const job = jobs.get(owner, args.job_id);
-        if (!job) throw new ToolError(`Job "${args.job_id}" not found.`);
-        const stream = args.stream ?? 'stdout';
-        if (stream !== 'stdout' && stream !== 'stderr') throw new ToolError('stream must be "stdout" or "stderr".');
-        try {
-          const page = job[stream].page(args.tail === undefined && args.offset === undefined ? { tail: 100 } : { offset: args.offset, limit: args.limit, tail: args.tail });
-          return { job_id: job.id, status: job.status, exit_code: job.exitCode, stream, ...page };
-        } catch (error) { throw new ToolError(error.message); }
-      },
-    },
-    {
-      name: 'job_wait',
-      description: `Wait for a job to finish (up to timeout_s, max ${MAX_WAIT_SECONDS}) and return its status and output tails.`,
-      annotations: { readOnlyHint: true, openWorldHint: false },
-      inputSchema: { type: 'object', additionalProperties: false, required: ['job_id'], properties: {
-        job_id: { type: 'string' },
-        timeout_s: { type: 'integer', minimum: 1, maximum: MAX_WAIT_SECONDS },
-      } },
-      async run(args, { owner, signal }) {
-        const job = jobs.get(owner, args.job_id);
-        if (!job) throw new ToolError(`Job "${args.job_id}" not found.`);
-        let wait;
-        try { wait = intInRange(args.timeout_s, 1, MAX_WAIT_SECONDS, 30) * 1000; } catch (error) { throw new ToolError(error.message); }
-        await jobs.wait(job, wait, signal);
-        return jobs.summary(job);
-      },
-    },
-    {
-      name: 'job_kill',
-      description: 'Stop a running job and its child processes.',
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-      inputSchema: { type: 'object', additionalProperties: false, required: ['job_id'], properties: { job_id: { type: 'string' } } },
-      async run(args, { owner }) {
-        const job = jobs.get(owner, args.job_id);
-        if (!job) throw new ToolError(`Job "${args.job_id}" not found.`);
-        jobs.kill(job);
-        await jobs.wait(job, 5000);
-        return jobs.summary(job, { tail: 20 });
-      },
-    },
   ];
 
   const byName = new Map(tools.map(tool => [tool.name, tool]));
@@ -574,7 +497,6 @@ export function createTools({ store, zellij, jobs }) {
     },
     /** Release everything an MCP session owns (DELETE / termination). */
     async releaseOwner(owner) {
-      jobs.dropOwner(owner);
       lostOwners.delete(owner);
       const sessions = store.owned(owner);
       for (const name of sessions) {

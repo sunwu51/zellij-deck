@@ -7,7 +7,6 @@ import path from 'node:path';
 import { resolveZellij, bridgePaths, projectRoot } from './platform.mjs';
 import { McpSessionStore, DEFAULT_TTL_MS } from './mcp/store.mjs';
 import { ZellijClient } from './mcp/zellij.mjs';
-import { JobManager } from './mcp/jobs.mjs';
 import { createTools } from './mcp/tools.mjs';
 import { createMcpHandler } from './mcp/handler.mjs';
 import { preparePty } from '../scripts/prepare-pty.mjs';
@@ -113,10 +112,9 @@ const zellijClient = new ZellijClient({
   query: zellijQuery, cwd,
   spawnPty: (args, options) => pty.spawn(executable, args, { name: 'xterm-256color', cols: options.cols || 160, rows: options.rows || 45, cwd: options.cwd || cwd, env }),
 });
-const jobs = new JobManager({ cwd, env });
 const mcp = createMcpHandler({
   store: mcpStore,
-  tools: createTools({ store: mcpStore, zellij: zellijClient, jobs }),
+  tools: createTools({ store: mcpStore, zellij: zellijClient }),
   serverInfo: { name: 'side-shell', title: 'Side Shell terminals', version: packageVersion },
 });
 function handleMcp(req, res) {
@@ -277,7 +275,6 @@ server.listen(port, host, () => {
 });
 function shutdown() {
   mcp.close();
-  jobs.shutdown();
   // Only the bridge's sizing clients exit; agent Zellij sessions keep running.
   zellijClient.shutdown();
   for (const ws of wss.clients) ws.terminate();

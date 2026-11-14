@@ -92,10 +92,10 @@ try {
   const b = await initialize('agent-b');
   const listed = await (await post({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/list' }, a)).json();
   const toolNames = listed.result.tools.map(tool => tool.name);
-  for (const name of ['pane_open', 'pane_list', 'pane_close', 'pane_type', 'pane_keys', 'pane_mouse', 'pane_read', 'pane_screen', 'pane_wait', 'session_kill', 'session_adopt', 'exec', 'job_output']) {
+  for (const name of ['pane_open', 'pane_list', 'pane_close', 'pane_type', 'pane_keys', 'pane_mouse', 'pane_read', 'pane_screen', 'pane_wait', 'session_kill', 'session_adopt']) {
     assert.ok(toolNames.includes(name), `tool ${name} listed`);
   }
-  assert.equal(toolNames.some(name => /^(session_create|session_list|pane_run|job_list)$/.test(name)), false, 'Removed tools are gone');
+  assert.equal(toolNames.some(name => /^(session_create|session_list|pane_run|exec|job_.*)$/.test(name)), false, 'Removed tools are gone');
   assert.ok(listed.result.tools.every(tool => !JSON.stringify(tool.inputSchema).includes('"session"') || tool.name === 'session_adopt'), 'No tool takes a session argument');
   pass(`${toolNames.length} tools, and none but session_adopt takes a session argument`);
 
@@ -222,28 +222,6 @@ try {
   assert.match((await call(a, 'pane_read', { pane: 'terminal_9999' })).error, /not found/, 'A pane that never existed is just missing');
   assert.deepEqual((await ok(a, 'pane_list')).panes.map(item => item.pane), [shellPane.pane]);
   pass('A pane closed from outside ends pane_wait with "closed" and is reported as closed afterwards');
-
-  // exec: separate streams, exit codes, background continuation, paging, kill.
-  const direct = await ok(a, 'exec', { argv: [process.execPath, '-e', "console.log('to-stdout'); console.error('to-stderr'); process.exit(5)"] });
-  assert.equal(direct.status, 'exited');
-  assert.equal(direct.exit_code, 5);
-  assert.equal(direct.stdout.text, 'to-stdout');
-  assert.equal(direct.stderr.text, 'to-stderr');
-  const shell = await ok(a, 'exec', { command: 'echo shell-ok' });
-  assert.equal(shell.exit_code, 0, JSON.stringify(shell));
-  assert.ok(shell.stdout.text.includes('shell-ok'));
-  const many = await ok(a, 'exec', { argv: [process.execPath, '-e', 'for (let i = 0; i < 500; i++) console.log(`line ${i}`)'] });
-  assert.equal(many.stdout.total_lines, 500);
-  const page = await ok(a, 'job_output', { job_id: many.job_id, offset: 10, limit: 3 });
-  assert.equal(page.text, 'line 10\nline 11\nline 12');
-  assert.equal(page.next_offset, 13);
-  const slow = await ok(a, 'exec', { argv: [process.execPath, '-e', 'setTimeout(() => {}, 60000)'], timeout_s: 1 });
-  assert.equal(slow.status, 'running');
-  assert.match((await call(b, 'job_output', { job_id: slow.job_id })).error, /not found/, 'Jobs are private too');
-  assert.ok((await ok(a, 'pane_list')).jobs.some(job => job.job_id === slow.job_id), 'pane_list also lists your jobs');
-  const killed = await ok(a, 'job_kill', { job_id: slow.job_id });
-  assert.equal(killed.status, 'killed');
-  pass('exec separates stdout/stderr, reports exit codes, pages output, backgrounds and kills jobs');
 
   // session_kill ends your session; the next pane_open starts a fresh one.
   await ok(b, 'pane_open', {});
