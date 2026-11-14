@@ -6,15 +6,18 @@ import xterm from '@xterm/xterm';
 const { outputFiles } = await build({
   entryPoints: ['extension/unicode.ts'], bundle: true, write: false,
   format: 'esm', platform: 'node',
+  // Exercise the browser path: the addon assumes Node Buffer.buffer starts at
+  // offset zero, which is false for Node 22 pooled buffers and corrupts its trie.
+  define: { Buffer: 'undefined' },
 });
 const { useModernWidths } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`);
-const snapshotBundle = await build({ entryPoints: ['extension/snapshot-render.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+const snapshotBundle = await build({ entryPoints: ['extension/snapshot-render.ts'], bundle: true, write: false, format: 'esm', platform: 'node', define: { Buffer: 'undefined' } });
 const { composeTab } = await import(`data:text/javascript;base64,${Buffer.from(snapshotBundle.outputFiles[0].text).toString('base64')}`);
 const { Terminal } = xterm;
 const write = (terminal, text) => new Promise(resolve => terminal.write(text, resolve));
-function createTerminal(cols = 80, conpty = false) {
-  const terminal = new Terminal({ cols, rows: 5, allowProposedApi: true });
-  useModernWidths(terminal, conpty);
+function createTerminal(cols = 80, rows = 5) {
+  const terminal = new Terminal({ cols, rows, allowProposedApi: true });
+  useModernWidths(terminal);
   return terminal;
 }
 
@@ -66,27 +69,28 @@ test('ASCII, bare text symbols, combining accents, CJK and Powerline keep their 
   } finally { terminal.dispose(); }
 });
 
-test('Windows Zellij/ConPTY output without VS16 preserves the Git UI two-column recycle glyph', async () => {
-  const terminal = createTerminal(80, true);
+test('ConPTY flattened rows and incremental cursor updates do not accumulate emoji width drift', async () => {
+  const terminal = createTerminal(100, 15);
   try {
-    // Captured from native Zellij 0.45.1 through ConPTY: source ♻️ becomes
-    // bare U+267B; no selector survives to trigger standard grapheme widening.
-    const recycle = '♻ VS16 recycle                         | right border';
-    const sparkles = '✨ sparkles                             | right border';
-    await write(terminal, `\x1b[2;1H${recycle}\x1b[4;1H${sparkles}`);
-    assert.equal(terminal.buffer.active.getLine(1).getCell(0).getChars(), '♻');
-    assert.equal(terminal.buffer.active.getLine(1).getCell(0).getWidth(), 2);
-    assert.equal(terminal.buffer.active.getLine(1).getCell(40).getChars(), '|');
-    assert.equal(terminal.buffer.active.getLine(3).getCell(40).getChars(), '|');
-  } finally { terminal.dispose(); }
-});
-
-test('ConPTY compatibility keeps intact VS16 sequences at two columns, not three', async () => {
-  const terminal = createTerminal(80, true);
-  try {
-    await write(terminal, 'A♻️ |');
-    assert.equal(terminal.buffer.active.getLine(0).getCell(1).getChars(), '♻️');
-    assert.equal(terminal.buffer.active.getLine(0).getCell(4).getChars(), '|');
+    // Real native Zellij/ConPTY shape: screen rows are concatenated without CR/LF.
+    // ♻️ has already become bare ♻ upstream, and padding accounts for that cell.
+    const recycle = '♻ commit message                                                author |                            ';
+    const sparkles = '✨ commit message                                                author |                           ';
+    const frame = Array.from({ length: 10 }, (_, i) => i % 2 ? sparkles : recycle).join('');
+    for (let tick = 0; tick < 10; tick++) {
+      terminal.resize(tick % 2 ? 100 : 101, 15);
+      terminal.resize(100, 15);
+      await write(terminal, `\x1b[2;1H${frame}`);
+      // ConPTY later edits a cell using its original physical grid coordinates.
+      await write(terminal, '\x1b[2;66HAUTHOR');
+      for (let row = 0; row < 10; row++) {
+        const line = terminal.buffer.active.getLine(row + 1);
+        assert.equal(line.getCell(0).getChars(), row % 2 ? '✨' : '♻', `row ${row}, tick ${tick}`);
+        assert.equal(line.getCell(row % 2 ? 72 : 71).getChars(), '|', `row ${row}, tick ${tick}`);
+      }
+      assert.equal(terminal.buffer.active.getLine(1).getCell(65).getChars(), 'A');
+      assert.equal(terminal.buffer.active.getLine(1).getCell(0).getWidth(), 1);
+    }
   } finally { terminal.dispose(); }
 });
 

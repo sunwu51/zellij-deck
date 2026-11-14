@@ -132,6 +132,8 @@ See [examples/dracula-windows-terminal.json](examples/dracula-windows-terminal.j
 
 The extension also bundles a licensed Nerd Font symbols fallback for Powerline separators; no OS font installation or remote font request is required.
 
+Terminal windows and previews use Unicode 15 grapheme widths. On Windows, native Zellij/ConPTY can strip the emoji variation selector from symbols such as `♻️`, leaving the one-column text symbol `♻`. wshell preserves the received stream's cell widths: forcing that bare symbol to two columns breaks ConPTY's implicit line wrapping and causes cumulative drift during redraws. A one-column difference already present in the upstream Git UI output can therefore remain; wshell cannot recover the discarded presentation selector from the stream.
+
 ## Keyboard shortcuts and clipboard
 
 Click the terminal and use **Interact** mode to send keyboard input. Watch mode never sends input.
