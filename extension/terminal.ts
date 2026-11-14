@@ -47,7 +47,8 @@ try {
 } catch { symbolFontFailed = true; }
 
 const terminal = new Terminal({
-  cursorBlink: true, fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT,
+  cursorStyle: 'bar', cursorWidth: 2, cursorBlink: true,
+  fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT,
   fontFamily: FONT_FAMILY,
   scrollback: 5000, allowProposedApi: true, allowTransparency: false,
   disableStdin: true,
