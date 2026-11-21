@@ -1,9 +1,11 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { ImageAddon } from '@xterm/addon-image';
 import { createRendererController, normalizeRenderer, rendererLabel, type RendererPreference } from './renderer';
 import { keyAction, controlCharacter, shiftEnterSequence, applyKittyKeyboard } from './keyboard';
 import { terminalColorOptions, selectedPalette, normalizeAppearance } from './theme';
+import { copyToClipboard, osc52Text } from './clipboard';
 import { useModernWidths } from './unicode';
 import {
   FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT,
@@ -54,12 +56,16 @@ const terminal = new Terminal({
   fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT,
   fontFamily: FONT_FAMILY,
   scrollback: 5000, allowProposedApi: true, allowTransparency: false,
+  // macOS composes Option+letter into symbols (Option+D -> ∂); send ESC+letter so Zellij sees Alt.
+  macOptionIsMeta: true,
   disableStdin: true,
   ...terminalColorOptions,
 });
 useModernWidths(terminal);
 const fit = new FitAddon();
 terminal.loadAddon(fit);
+// Sixel (and iTerm2 inline image) support, so Zellij can pass through image previews such as yazi's.
+terminal.loadAddon(new ImageAddon());
 terminal.open(element('terminal'));
 function showNotice(message = '') {
   const text = message || (symbolFontFailed ? 'Terminal symbol font could not load. Rebuild and reload the extension to restore Powerline icons.' : '');
@@ -145,6 +151,17 @@ for (const prefix of ['>', '<', '=']) {
     return true;
   });
 }
+// Zellij copies with OSC 52; without a handler the "copied" message is a lie.
+terminal.parser.registerOscHandler(52, data => {
+  const text = osc52Text(data);
+  if (text !== null) {
+    // Only failures are shown: the notice bar resizes the terminal.
+    copyToClipboard(text).catch(error => {
+      showNotice(`Clipboard copy failed (${error instanceof Error ? error.name + ': ' + error.message : String(error)}).`);
+    });
+  }
+  return true;
+});
 const isMac = /Mac/i.test(navigator.platform);
 const keyboardHint = isMac
   ? 'Paste: Cmd+V · Copy: Cmd+C · Send Ctrl: Ctrl+. then a letter'
