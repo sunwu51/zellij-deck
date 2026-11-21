@@ -1,4 +1,6 @@
-export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' };
+/** `shell` is a plain PowerShell and `bare` an empty-config Zellij; both exist to diagnose lag. */
+export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' | 'shell' | 'bare' };
+const baseMode = (mode: WindowTarget['mode']) => (mode === 'watch' || mode === 'shell' || mode === 'bare' ? mode : 'attach');
 const WINDOW_SIZE = { width: 1100, height: 760 };
 /**
  * A window attaches to an existing session and never creates one implicitly. Only an explicit
@@ -10,7 +12,7 @@ export function popoutUrl(base: string, target?: WindowTarget, options: { create
   const params = new URLSearchParams({ view: 'window' });
   if (target) {
     params.set('session', target.session);
-    params.set('mode', target.mode === 'watch' ? 'watch' : 'attach');
+    params.set('mode', baseMode(target.mode));
     if (options.create && target.mode === 'create') params.set('new', '1');
   }
   url.hash = params.toString();
@@ -20,13 +22,13 @@ export function windowTarget(hash: string): WindowTarget | undefined {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const session = params.get('session') || '';
   const mode = params.get('mode');
-  if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach')) return;
+  if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach' && mode !== 'shell' && mode !== 'bare')) return;
   if (mode === 'attach' && params.get('new') === '1') return { session, mode: 'create' };
   return { session, mode };
 }
 /** The window's URL once its session is connected: same session and mode, never `new=1`. */
 export function attachedUrl(href: string, target: WindowTarget): string {
-  return popoutUrl(href.split('#')[0], { session: target.session, mode: target.mode === 'watch' ? 'watch' : 'attach' });
+  return popoutUrl(href.split('#')[0], { session: target.session, mode: baseMode(target.mode) });
 }
 /** Open a session in its own terminal window (launched from the dashboard). */
 export async function openSessionWindow(target: WindowTarget): Promise<void> {

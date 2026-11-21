@@ -1,5 +1,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { createRendererController, normalizeRenderer, rendererLabel, type RendererPreference } from './renderer';
 import { keyAction, controlCharacter, shiftEnterSequence, applyKittyKeyboard } from './keyboard';
 import { terminalColorOptions, selectedPalette, normalizeAppearance } from './theme';
 import { useModernWidths } from './unicode';
@@ -10,9 +12,9 @@ import {
 import { initThemeControls } from './theme-controls';
 import { initWindowControls, openDashboard, windowTarget, attachedUrl } from './window-controls';
 
-type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
+type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
-type Target = { session: string; mode: 'watch' | 'attach' | 'create' };
+type Target = { session: string; mode: 'watch' | 'attach' | 'create' | 'shell' | 'bare' };
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 // This page is only a dedicated terminal; the dashboard is the launcher.
 const settingsPanel = element('settings');
@@ -22,6 +24,7 @@ const tokenInput = element<HTMLInputElement>('token');
 const fontInput = element<HTMLInputElement>('font-size');
 const lineHeightInput = element<HTMLInputElement>('line-height');
 const reconnectInput = element<HTMLInputElement>('auto-reconnect');
+const rendererInput = element<HTMLSelectElement>('renderer');
 const sessionSelect = element<HTMLSelectElement>('session');
 const watchButton = element<HTMLButtonElement>('watch');
 const attachButton = element<HTMLButtonElement>('attach');
@@ -29,7 +32,7 @@ const connectButton = element<HTMLButtonElement>('connect');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const refreshButton = element<HTMLButtonElement>('refresh');
 const notice = element('notice');
-let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch' };
+let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
 let socket: WebSocket | undefined;
 let target: Target | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -64,6 +67,14 @@ function showNotice(message = '') {
   notice.hidden = !text;
 }
 showNotice();
+// The renderer is applied once saved settings load (see init) and live on settings changes.
+const renderer = createRendererController(terminal, () => new WebglAddon(), (_state, problem) => {
+  updateDimensions();
+  if (problem) showNotice(problem);
+});
+function updateDimensions() {
+  element('dimensions').textContent = `${terminal.cols} × ${terminal.rows} · ${rendererLabel(renderer.state)}`;
+}
 function status(text: string, state = '') {
   element('status').textContent = text;
   element('status-dot').className = `status-dot ${state}`;
@@ -106,7 +117,7 @@ function setBusy(busy: boolean) {
 function resize() {
   if (element('terminal').clientHeight < 30 || element('terminal').clientWidth < 30) return;
   fit.fit();
-  element('dimensions').textContent = `${terminal.cols} × ${terminal.rows}`;
+  updateDimensions();
   if (ready && socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
   }
@@ -381,7 +392,7 @@ function connect(next: Target, retry = false) {
         setTimeout(() => { void refreshSessions(true); }, 750);
       } else if (message.type === 'exit') {
         intentionalExit = true;
-        showNotice(`Zellij client exited (code ${message.exitCode}). The session may have ended or been detached.`);
+        showNotice(`Terminal process exited (code ${message.exitCode}). The session may have ended or been detached.`);
       } else if (message.type === 'error') {
         intentionalExit = true;
         showNotice(message.message);
@@ -444,11 +455,12 @@ element('save-settings').addEventListener('click', async () => {
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return showNotice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
   if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return showNotice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   detach();
-  settings = { ...settings, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked };
+  settings = { ...settings, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked, renderer: normalizeRenderer(rendererInput.value) };
   try { await chrome.storage.local.set({ settings }); }
   catch { showNotice('Could not save settings. Please retry.'); return; }
   terminal.options.fontSize = fontSize;
   terminal.options.lineHeight = lineHeight;
+  renderer.apply(settings.renderer);
   setSettingsOpen(false);
   resize();
   await refreshSessions();
@@ -465,14 +477,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.settings?.newValue) {
     const saved = changes.settings.newValue as Partial<Settings>;
     // Credentials are used on the next connection; do not drop an active session.
-    settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight) };
+    settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), renderer: normalizeRenderer(saved.renderer) };
     portInput.value = String(settings.port);
     tokenInput.value = settings.token;
     fontInput.value = String(settings.fontSize);
     lineHeightInput.value = String(settings.lineHeight);
     reconnectInput.checked = settings.autoReconnect;
+    rendererInput.value = settings.renderer;
     terminal.options.fontSize = settings.fontSize;
     terminal.options.lineHeight = settings.lineHeight;
+    // A renderer switch applies live and keeps the session attached.
+    renderer.apply(settings.renderer);
     resize();
   }
 });
@@ -482,7 +497,7 @@ async function init() {
     const stored = await chrome.storage.local.get('settings');
     if (stored.settings && typeof stored.settings === 'object') {
       const saved = stored.settings as Partial<Settings>;
-      settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true };
+      settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true, renderer: normalizeRenderer(saved.renderer) };
     }
   } catch { showNotice('Could not load saved settings.'); }
   portInput.value = String(settings.port);
@@ -490,8 +505,10 @@ async function init() {
   fontInput.value = String(settings.fontSize);
   lineHeightInput.value = String(settings.lineHeight);
   reconnectInput.checked = settings.autoReconnect;
+  rendererInput.value = settings.renderer;
   terminal.options.fontSize = settings.fontSize;
   terminal.options.lineHeight = settings.lineHeight;
+  renderer.apply(settings.renderer);
   setMode(settings.mode);
   resize();
   const requested = windowTarget(location.hash);

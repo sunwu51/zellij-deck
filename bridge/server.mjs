@@ -2,7 +2,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveZellij, bridgePaths, projectRoot } from './platform.mjs';
 import { McpSessionStore, DEFAULT_TTL_MS } from './mcp/store.mjs';
@@ -16,6 +16,7 @@ import * as pty from 'node-pty';
 import {
   MAX_MESSAGE_BYTES, MAX_BUFFER_BYTES, validToken, isExtensionOrigin,
   parseClientMessage, parseSessions, noSessions, launchArgs, terminalEnv,
+  bareConfig, BARE_LAYOUT, shellCandidates, shellArgs,
   snapshotRoute, snapshotArgs, snapshotLayout, sanitizeDump, snapshotFailure,
 } from './protocol.mjs';
 
@@ -29,6 +30,16 @@ const executable = await resolveZellij();
 const { stateDir, cwd } = bridgePaths();
 if (!(await stat(cwd)).isDirectory()) throw new Error(`Terminal working directory is not a directory: ${cwd}`);
 await mkdir(stateDir, { recursive: true, mode: 0o700 });
+// Lag-diagnosis modes: an empty Zellij config (no plugins/keybindings) and a bare layout.
+const bareDir = path.join(stateDir, 'bare');
+const bareConfigPath = path.join(bareDir, 'config.kdl');
+await mkdir(path.join(bareDir, 'layouts'), { recursive: true, mode: 0o700 });
+await writeFile(path.join(bareDir, 'layouts', 'bare.kdl'), BARE_LAYOUT);
+await writeFile(bareConfigPath, bareConfig(path.join(bareDir, 'layouts')));
+let shellFile;
+for (const candidate of shellCandidates()) {
+  try { if ((await stat(candidate)).isFile()) { shellFile = candidate; break; } } catch {}
+}
 const tokenPath = path.join(stateDir, 'token');
 let token = process.env.WEBSHELL_TOKEN;
 if (!token) {
@@ -245,14 +256,17 @@ wss.on('connection', ws => {
         if (terminal) throw new Error('A session is already open.');
         clearTimeout(openTimeout);
         mode = message.mode;
-        terminal = pty.spawn(executable, launchArgs(message), {
+        // 'shell' runs a plain shell with no Zellij at all, to compare against Zellij sessions.
+        if (mode === 'shell' && !shellFile) throw new Error('No PowerShell or shell found on PATH.');
+        const [file, args] = mode === 'shell' ? [shellFile, shellArgs(shellFile)] : [executable, launchArgs(message, { bareConfigPath })];
+        terminal = pty.spawn(file, args, {
           name: 'xterm-256color', cols: message.cols, rows: message.rows,
           cwd, env,
         });
         subscriptions.push(terminal.onData(data => send({ type: 'output', data })));
         subscriptions.push(terminal.onExit(event => {
           send({ type: 'exit', exitCode: event.exitCode });
-          ws.close(1000, 'Zellij client exited.');
+          ws.close(1000, 'Terminal process exited.');
         }));
         send({ type: 'ready', mode, session: message.session });
       } else if (!terminal) {
@@ -277,6 +291,7 @@ server.listen(port, host, () => {
   console.log(`\nwshell bridge — ${version.stdout.trim()}`);
   console.log(`Platform: ${process.platform}/${process.arch}`);
   console.log(`Zellij: ${executable}`);
+  console.log(`Shell for the plain-shell test: ${shellFile || 'not found'}`);
   console.log(`State directory: ${stateDir}`);
   console.log(`Listening only on http://${host}:${port}`);
   console.log(`Pairing token: ${token}`);

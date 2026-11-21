@@ -63,12 +63,13 @@ Each window is a separate Zellij client: multiple windows can operate in Interac
 
 ## Session previews
 
-Click the extension icon (or **▦** in a terminal window) to open the dashboard in a browser tab. If it is already open, that tab is focused. Like a browser automation dashboard, it shows a live thumbnail for every running Zellij session at once:
+Click the extension icon (or **▦** in a terminal window) to open the dashboard in a browser tab. If it is already open, that tab is focused. Like a browser automation dashboard, it shows a thumbnail for every running Zellij session at once:
 
 - Each card renders the session's active tab as Zellij would show it: pane positions, frames, focused-pane highlight, visible floating panes, and ANSI/24-bit colors in your saved terminal theme.
 - Click a tab chip to preview another tab of that session. Click the thumbnail for a large view of the whole tab; Escape closes it.
 - **Watch** / **Interact** open that session in a terminal window. **Delete** kills and permanently deletes it after confirmation. Exited sessions are listed separately, with **Resurrect** and **Delete** actions.
-- Auto-refresh defaults to every 5 seconds (off, 2s, 5s, or 15s). It pauses while the tab is hidden.
+- Previews refresh only when you open the dashboard, click **↻ Refresh**, delete a session, or change the bridge port or token. There is no auto-refresh: on Windows every `zellij action` query briefly stalls all attached Zellij clients (up to 1–2 s), which made typing and scrolling stutter in open terminal windows.
+- **Lag diagnostics** opens a plain PowerShell with no Zellij, or a bare Zellij session (`bare-test`) started from an empty config with a single pane and no plugins. Compare typing and scrolling there with your usual session to tell whether lag comes from the browser, Zellij, or your Zellij config.
 
 Preview capture is strictly read-only (management actions are explicit) and do not attach a Zellij client. The bridge reads layout with `zellij action list-tabs --json` / `list-panes --json` and screen text with `dump-screen --pane-id --ansi`, so capturing never changes a session's size, focus, or active tab. Before pane text leaves the bridge, it is reduced to printable text plus SGR color/style codes. At most six Zellij query processes run at once, and at most 48 panes are captured per session. Plugin panes (status bar, tab bar, sidebars) have no screen text to dump and appear as labeled placeholders. A session with no attached client is marked **DETACHED**: it is still running in the background (Zellij keeps its server process alive after the last client leaves), but no terminal window shows it. Such a session reports no active tab, so the first tab is shown. If the dashboard says the bridge is out of date, stop the bridge and run `npm run bridge` again; a bridge started before this feature cannot capture previews. Previews require a Zellij version with these actions (verified with 0.45.1); older versions show an upgrade message on the card.
 
@@ -133,6 +134,8 @@ See [examples/dracula-windows-terminal.json](examples/dracula-windows-terminal.j
 The extension also bundles a licensed Nerd Font symbols fallback for Powerline separators; no OS font installation or remote font request is required.
 
 Terminal windows and previews use Unicode 15 grapheme widths. On Windows, native Zellij/ConPTY can strip the emoji variation selector from symbols such as `♻️`, leaving the one-column text symbol `♻`. wshell preserves the received stream's cell widths: forcing that bare symbol to two columns breaks ConPTY's implicit line wrapping and causes cumulative drift during redraws. A one-column difference already present in the upstream Git UI output can therefore remain; wshell cannot recover the discarded presentation selector from the stream.
+
+Terminal windows render with WebGL (GPU) by default, which keeps scrolling and full-screen TUI repaints cheaper than xterm.js's DOM renderer. Switch with **Settings → Renderer** in the dashboard or a terminal window; the change applies to open windows without detaching. The terminal footer shows the renderer in use. If WebGL is unavailable or the GPU context is lost, the window falls back to DOM rendering and says so.
 
 ## Keyboard shortcuts and clipboard
 

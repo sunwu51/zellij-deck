@@ -4,8 +4,9 @@ import { composeTab, drawGrid, type Grid } from './snapshot-render';
 import { openSessionWindow, type WindowTarget } from './window-controls';
 import { initThemeControls } from './theme-controls';
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT, migrateFontSize, lineHeightOrDefault } from './font';
+import { normalizeRenderer, type RendererPreference } from './renderer';
 
-type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach' };
+type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
 type Card = {
   name: string; current: boolean;
@@ -18,12 +19,10 @@ const element = <T extends HTMLElement>(id: string) => document.getElementById(i
 const grid = element('grid');
 const focusDialog = element<HTMLDialogElement>('focus');
 const focusCanvas = element<HTMLCanvasElement>('focus-canvas');
-const intervalSelect = element<HTMLSelectElement>('interval');
 const filterInput = element<HTMLInputElement>('filter');
 const cards = new Map<string, Card>();
-let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch' };
+let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
 let palette: Palette = selectedPalette(normalizeAppearance(undefined));
-let timer: ReturnType<typeof setTimeout> | undefined;
 let refreshing = false;
 let refreshAgain = false;
 let focused: string | undefined;
@@ -253,7 +252,6 @@ function showEmpty(title: string, detail: string) {
 }
 
 async function refreshAll() {
-  clearTimeout(timer);
   if (refreshing) { refreshAgain = true; return; }
   if (!settings.token) {
     setSettingsOpen(true);
@@ -311,14 +309,7 @@ async function refreshAll() {
     refreshing = false;
     element<HTMLButtonElement>('refresh').disabled = false;
     if (refreshAgain) { refreshAgain = false; void refreshAll(); }
-    else schedule();
   }
-}
-function schedule() {
-  clearTimeout(timer);
-  const interval = Number(intervalSelect.value);
-  // Do not spawn Zellij queries for a page nobody is looking at.
-  if (interval > 0 && !document.hidden) timer = setTimeout(() => { void refreshAll(); }, interval);
 }
 
 function setSettingsOpen(open: boolean) {
@@ -331,6 +322,7 @@ function fillSettings() {
   element<HTMLInputElement>('font-size').value = String(settings.fontSize);
   element<HTMLInputElement>('line-height').value = String(settings.lineHeight);
   element<HTMLInputElement>('auto-reconnect').checked = settings.autoReconnect;
+  element<HTMLSelectElement>('renderer').value = normalizeRenderer(settings.renderer);
   element<HTMLSelectElement>('mode').value = settings.mode;
 }
 element('settings-toggle').addEventListener('click', () => setSettingsOpen(element('settings').hidden));
@@ -343,7 +335,7 @@ element('save-settings').addEventListener('click', async () => {
   if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return notice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) return notice(`Font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}.`);
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return notice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
-  const next = { ...settings, port, token, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked };
+  const next = { ...settings, port, token, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked, renderer: normalizeRenderer(element<HTMLSelectElement>('renderer').value) };
   try { await chrome.storage.local.set({ settings: next }); }
   catch { notice('Could not save settings. Please retry.'); return; }
   settings = next;
@@ -355,6 +347,8 @@ element('connect').addEventListener('click', () => {
   if (!session) return notice('Choose a session, or create a new one.');
   openWindow(session, element<HTMLSelectElement>('mode').value === 'watch' ? 'watch' : 'attach');
 });
+element('test-shell').addEventListener('click', () => openWindow('pwsh-test', 'shell'));
+element('test-bare').addEventListener('click', () => openWindow('bare-test', 'bare'));
 element('create-form').addEventListener('submit', event => {
   event.preventDefault();
   const name = element<HTMLInputElement>('new-name').value.trim();
@@ -408,13 +402,8 @@ new ResizeObserver(() => {
     if (focused) void renderFocus();
   }, 150);
 }).observe(grid);
-document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else void refreshAll(); });
 element('refresh').addEventListener('click', () => { void refreshAll(); });
 filterInput.addEventListener('input', applyFilter);
-intervalSelect.addEventListener('change', () => {
-  try { localStorage.setItem('wshell-dashboard-interval', intervalSelect.value); } catch {}
-  schedule();
-});
 setInterval(updateTimes, 5000);
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
@@ -425,18 +414,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes.settings?.newValue) {
     const next = changes.settings.newValue as Partial<Settings>;
+    // Terminal windows save their last session on every connect; only a new bridge address
+    // or token warrants querying Zellij again.
+    const bridgeChanged = next.port !== settings.port || next.token !== settings.token;
     settings = { ...settings, ...next };
     fillSettings();
-    void refreshAll();
+    if (bridgeChanged) void refreshAll();
   }
 });
 
 async function init() {
   await initThemeControls();
-  try {
-    const saved = localStorage.getItem('wshell-dashboard-interval') ?? localStorage.getItem('side-shell-dashboard-interval');
-    if (saved && Array.from(intervalSelect.options).some(option => option.value === saved)) intervalSelect.value = saved;
-  } catch {}
   try {
     const stored = await chrome.storage.local.get(['settings', 'appearance']);
     const saved = stored.settings as Partial<Settings> | undefined;

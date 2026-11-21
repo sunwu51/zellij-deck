@@ -47,7 +47,7 @@ export function parseClientMessage(text) {
   if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('Invalid message.');
   if (message.type === 'open') {
     if (!validSession(message.session)) throw new Error('Use a session name with letters, numbers, dots, underscores, or hyphens (up to 96 characters).');
-    if (!['watch', 'attach', 'create'].includes(message.mode)) throw new Error('Invalid connection mode.');
+    if (!OPEN_MODES.includes(message.mode)) throw new Error('Invalid connection mode.');
     const size = dimensions(message.cols, message.rows);
     if (!size) throw new Error('Invalid terminal size.');
     return { type: 'open', session: message.session, mode: message.mode, ...size };
@@ -63,8 +63,31 @@ export function parseClientMessage(text) {
   throw new Error('Unsupported message.');
 }
 
-export function launchArgs({ mode, session }) {
+// 'shell' and 'bare' are lag-diagnosis modes: a plain shell with no Zellij at all, and Zellij
+// started from an empty config with a single bare pane (no plugins, keybindings or themes).
+export const OPEN_MODES = ['watch', 'attach', 'create', 'shell', 'bare'];
+
+export function bareConfig(layoutDir) {
+  const dir = String(layoutDir).replaceAll(String.fromCharCode(92), '/').replaceAll('"', '');
+  return ['show_startup_tips false', 'show_release_notes false', 'session_serialization false', 'pane_frames false',
+    'default_layout "bare"', `layout_dir "${dir}"`, ''].join('\n');
+}
+export const BARE_LAYOUT = 'layout {\n    pane\n}\n';
+
+/** Candidate shells: pwsh, then Windows PowerShell, on Windows; the user's login shell elsewhere. */
+export function shellCandidates({ platform = process.platform, env = process.env } = {}) {
+  if (platform !== 'win32') return [env.SHELL || '/bin/sh'];
+  const dirs = (env.PATH || env.Path || '').split(';').filter(Boolean).map(d => d.replace(/^"|"$/g, ''));
+  return ['pwsh.exe', 'powershell.exe'].flatMap(name => dirs.map(d => `${d}/${name}`));
+}
+export function shellArgs(file) { return /(?:pwsh|powershell)(?:\.exe)?$/i.test(file) ? ['-NoLogo'] : []; }
+
+export function launchArgs({ mode, session }, { bareConfigPath } = {}) {
   if (!validSession(session)) throw new Error('Invalid session name.');
+  if (mode === 'bare') {
+    if (!bareConfigPath) throw new Error('Bare Zellij configuration is unavailable.');
+    return ['--config', bareConfigPath, 'attach', '--create', session];
+  }
   if (mode === 'watch') return ['watch', session];
   if (mode === 'create') return ['attach', '--create', session];
   if (mode === 'attach') return ['attach', session];
