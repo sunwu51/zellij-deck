@@ -1,6 +1,8 @@
 name: Publish bridge to npm
 
 # Publishes whenever package.json's version has not been published yet.
+# Uses npm Trusted Publishing (OIDC): no token. On npmjs.com, package Settings -> Trusted Publisher,
+# add GitHub Actions with repository sunwu51/zellij-deck and workflow filename publish-npm.yml.
 on:
   push:
     branches: [master]
@@ -21,6 +23,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
       - id: version
         run: |
           name=$(node -p "require('./package.json').name")
@@ -37,6 +40,4 @@ jobs:
       - if: steps.version.outputs.published == 'false'
         run: npm run check && npm test
       - if: steps.version.outputs.published == 'false'
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
