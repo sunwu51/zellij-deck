@@ -1,8 +1,9 @@
 import { access, stat } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { constants, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setting } from './env.mjs';
 
 export const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 
@@ -30,10 +31,14 @@ export async function resolveZellij(options = {}) {
   throw new Error('Zellij executable not found. Install Zellij, add it to PATH, or set ZELLIJ_PATH to its absolute path. On macOS: brew install zellij.');
 }
 
-export function bridgePaths(env = process.env) {
+export function bridgePaths(env = process.env, { home = homedir(), legacyDir = path.join(projectRoot, '.bridge') } = {}) {
+  const state = setting(env, 'STATE_DIR');
+  const cwd = setting(env, 'CWD');
   return {
-    // Keep credentials stable when the bridge is launched from a different cwd.
-    stateDir: env.WEBSHELL_STATE_DIR ? path.resolve(env.WEBSHELL_STATE_DIR) : path.join(projectRoot, '.bridge'),
-    cwd: env.WEBSHELL_CWD ? path.resolve(env.WEBSHELL_CWD) : homedir(),
+    // Keep credentials stable when the bridge is launched from a different cwd. A package install
+    // cannot keep state beside its code, so default to the home directory; an existing checkout-local
+    // `.bridge` (from before the package existed) keeps being used so its pairing token stays valid.
+    stateDir: state ? path.resolve(state) : existsSync(legacyDir) ? legacyDir : path.join(home, '.zellij-deck'),
+    cwd: cwd ? path.resolve(cwd) : home,
   };
 }

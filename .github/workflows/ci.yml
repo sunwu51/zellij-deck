@@ -29,7 +29,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.node == 24
         with:
-          name: side-shell-extension-${{ matrix.os }}
+          name: zellij-deck-extension-${{ matrix.os }}
           path: dist/
           retention-days: 14
 

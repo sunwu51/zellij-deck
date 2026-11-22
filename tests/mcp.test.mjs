@@ -225,6 +225,7 @@ function fakeZellij({ session = 'ag-1' } = {}) {
     async sessions() { return state.session ? [{ name: state.session, exited: false, current: false }] : []; },
     async status(name) { return state.session === name ? 'running' : 'missing'; },
     async ensureAnchor() {},
+    async tabs() { return state.panes.map(pane => ({ tab_id: pane.id })); },
     async panes() {
       if (!state.session) throw new Error('Session is not running.');
       return state.panes.map(item => ({ ...pane(item.id), ...item }));
@@ -363,6 +364,34 @@ test('the first pane_open creates your session lazily and replaces its default s
   assert.deepEqual(zellij.state.panes.map(item => item.id), [1]);
   assert.equal(store.sessionOf(owner), zellij.state.created[0]);
   assert.deepEqual(store.ownership(zellij.state.created[0]).panes, [1]);
+});
+
+test('first pane_open waits for asynchronous default-tab cleanup after the shell disappears', async () => {
+  const { tools, zellij, owner } = toolsWithFake({ session: null });
+  const tabs = zellij.tabs.bind(zellij);
+  let pending = 0;
+  let sawClosedShell = false;
+  zellij.tabs = async () => {
+    const live = await tabs();
+    if (!zellij.state.panes.some(pane => pane.id === 0)) {
+      sawClosedShell = true;
+      if (++pending <= 2) return [{ tab_id: 0 }, ...live];
+    }
+    return live;
+  };
+  const opened = await tools.call('pane_open', { name: 'work' }, { owner });
+  assert.equal(opened.pane, 'terminal_1');
+  assert.equal(sawClosedShell, true);
+  assert.equal(pending, 3, 'Returns only once the original tab disappears');
+});
+
+test('first pane_open cleans up its session when default-tab removal times out', async () => {
+  const { tools, zellij, store, owner } = toolsWithFake({ session: null });
+  zellij.tabs = async () => [{ tab_id: 0 }];
+  await assert.rejects(tools.call('pane_open', {}, { owner }), /did not remove the default tab/);
+  assert.equal(store.sessionOf(owner), undefined);
+  assert.equal(zellij.state.session, null);
+  assert.equal(zellij.state.removed.length, 1);
 });
 
 test('each pane gets its own tab, and several panes require an explicit pane id', async () => {

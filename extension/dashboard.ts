@@ -1,3 +1,4 @@
+import { validBridgeIp } from './network';
 import { normalizeAppearance, selectedPalette, type Palette } from './theme';
 import { previewTab, relativeTime, type Snapshot } from './snapshot';
 import { composeTab, drawGrid, type Grid } from './snapshot-render';
@@ -6,7 +7,7 @@ import { initThemeControls } from './theme-controls';
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT, migrateFontSize, lineHeightOrDefault } from './font';
 import { normalizeRenderer, type RendererPreference } from './renderer';
 
-type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
+type Settings = { host: string; port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
 type Card = {
   name: string; current: boolean;
@@ -21,7 +22,7 @@ const focusDialog = element<HTMLDialogElement>('focus');
 const focusCanvas = element<HTMLCanvasElement>('focus-canvas');
 const filterInput = element<HTMLInputElement>('filter');
 const cards = new Map<string, Card>();
-let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
+let settings: Settings = { host: '127.0.0.1', port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
 let palette: Palette = selectedPalette(normalizeAppearance(undefined));
 let refreshing = false;
 let refreshAgain = false;
@@ -38,7 +39,7 @@ function status(text: string, state = '') {
   element('status-dot').className = `status-dot ${state}`;
 }
 async function bridge<T>(path: string, method = 'GET'): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:${settings.port}${path}`, {
+  const response = await fetch(`http://${settings.host}:${settings.port}${path}`, {
     method,
     headers: { Authorization: `Bearer ${settings.token}`, 'X-Side-Shell-Extension': chrome.runtime.id },
     signal: AbortSignal.timeout(10000),
@@ -317,6 +318,7 @@ function setSettingsOpen(open: boolean) {
   element('settings-toggle').setAttribute('aria-expanded', String(open));
 }
 function fillSettings() {
+  element<HTMLInputElement>('host').value = settings.host;
   element<HTMLInputElement>('port').value = String(settings.port);
   element<HTMLInputElement>('token').value = settings.token;
   element<HTMLInputElement>('font-size').value = String(settings.fontSize);
@@ -327,6 +329,8 @@ function fillSettings() {
 }
 element('settings-toggle').addEventListener('click', () => setSettingsOpen(element('settings').hidden));
 element('save-settings').addEventListener('click', async () => {
+  const host = element<HTMLInputElement>('host').value.trim();
+  if (!validBridgeIp(host)) return notice('Enter a specific IPv4 address, such as 192.168.1.10.');
   const port = Number(element<HTMLInputElement>('port').value);
   const token = element<HTMLInputElement>('token').value.trim();
   const fontSize = Number(element<HTMLInputElement>('font-size').value);
@@ -335,7 +339,7 @@ element('save-settings').addEventListener('click', async () => {
   if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return notice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) return notice(`Font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}.`);
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return notice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
-  const next = { ...settings, port, token, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked, renderer: normalizeRenderer(element<HTMLSelectElement>('renderer').value) };
+  const next = { ...settings, host, port, token, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked, renderer: normalizeRenderer(element<HTMLSelectElement>('renderer').value) };
   try { await chrome.storage.local.set({ settings: next }); }
   catch { notice('Could not save settings. Please retry.'); return; }
   settings = next;
@@ -347,8 +351,6 @@ element('connect').addEventListener('click', () => {
   if (!session) return notice('Choose a session, or create a new one.');
   openWindow(session, element<HTMLSelectElement>('mode').value === 'watch' ? 'watch' : 'attach');
 });
-element('test-shell').addEventListener('click', () => openWindow('pwsh-test', 'shell'));
-element('test-bare').addEventListener('click', () => openWindow('bare-test', 'bare'));
 element('create-form').addEventListener('submit', event => {
   event.preventDefault();
   const name = element<HTMLInputElement>('new-name').value.trim();
@@ -416,7 +418,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const next = changes.settings.newValue as Partial<Settings>;
     // Terminal windows save their last session on every connect; only a new bridge address
     // or token warrants querying Zellij again.
-    const bridgeChanged = next.port !== settings.port || next.token !== settings.token;
+    const bridgeChanged = (next.host ?? settings.host) !== settings.host || next.port !== settings.port || next.token !== settings.token;
     settings = { ...settings, ...next };
     fillSettings();
     if (bridgeChanged) void refreshAll();

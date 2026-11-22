@@ -11,6 +11,7 @@ for (const file of ['manifest.json', 'terminal.html', 'terminal.css', 'dashboard
 }
 await copyFile('node_modules/@xterm/xterm/css/xterm.css', 'dist/xterm.css');
 await cp('extension/fonts', 'dist/fonts', { recursive: true });
+await cp('extension/icons', 'dist/icons', { recursive: true, filter: source => !source.endsWith('.svg') });
 await build({
   entryPoints: ['extension/background.ts', 'extension/terminal.ts', 'extension/dashboard.ts'],
   outdir: 'dist', bundle: true, format: 'esm', platform: 'browser',

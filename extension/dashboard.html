@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>wshell dashboard</title>
+  <title>Zellij Deck</title>
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
   <header class="header">
-    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>wshell</h1><span class="subtitle">LOCAL SESSIONS · LIVE PREVIEWS</span></div></div>
+    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Zellij Deck</h1><span class="subtitle">LOCAL SESSIONS · LIVE PREVIEWS</span></div></div>
     <div class="toolbar"><button id="settings-toggle" aria-expanded="false" aria-controls="settings">⚙ Settings</button>
       <label class="sr-only" for="filter">Filter sessions</label><input id="filter" type="search" placeholder="Filter sessions" autocomplete="off" spellcheck="false">
       <button id="refresh" title="Refresh sessions and previews" aria-label="Refresh sessions and previews">↻ Refresh</button>
@@ -31,6 +31,7 @@
       <p id="theme-feedback" class="hint" role="status" aria-live="polite"></p>
     </section>
     <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
+    <label for="host">Bridge IP</label><input id="host" type="text" value="127.0.0.1" spellcheck="false" autocomplete="off">
     <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
     <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
     <div class="settings-row"><label for="font-size">Font size</label><input id="font-size" type="number" min="10" max="24" value="16"></div>
@@ -49,10 +50,6 @@
       </div>
       <p class="hint">Watch is read-only. Interact attaches a terminal client. Other sessions keep running.</p>
     </div>
-    <div class="launcher-test"><label>Lag diagnostics</label><div class="session-row">
-      <button id="test-shell" type="button">Plain PowerShell (no Zellij)</button>
-      <button id="test-bare" type="button">Bare Zellij (no plugins or layout)</button></div>
-      <p class="hint">Open these in a window and compare typing and scrolling with your normal session.</p></div>
     <form id="create-form"><label for="new-name">Create a session</label><div class="session-row">
       <input id="new-name" placeholder="Session name" maxlength="96" pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{0,95}" required>
       <button type="submit">Create &amp; open</button></div><p class="hint">Starts a new workspace in its own terminal window.</p>

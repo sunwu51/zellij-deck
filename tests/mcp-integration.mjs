@@ -20,8 +20,11 @@ const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const token = `mcp-integration-token-${Date.now()}`;
 const stateDir = await mkdtemp(path.join(tmpdir(), 'side-shell-mcp-'));
+// `npm run` defaults EDITOR to "vi", which switches zsh into vi mode and breaks the Home/End/Enter
+// key sequence below. Pane shells must behave the same under `npm run` and plain `node`.
+const { EDITOR: _editor, VISUAL: _visual, ...baseEnv } = process.env;
 const bridge = spawn(process.execPath, ['bridge/server.mjs'], {
-  env: { ...process.env, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token, WEBSHELL_STATE_DIR: stateDir },
+  env: { ...baseEnv, ZELLIJ_DECK_PORT: String(port), ZELLIJ_DECK_TOKEN: token, ZELLIJ_DECK_STATE_DIR: stateDir },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let logs = '';
@@ -75,7 +78,7 @@ async function zellijSessions() {
 }
 
 try {
-  for (let i = 0; i < 100 && !logs.includes('Listening only'); i++) await pause(100);
+  for (let i = 0; i < 100 && !logs.includes('Listening on http://'); i++) await pause(100);
   assert.ok(logs.includes('MCP endpoint'), logs);
 
   // Transport and session rules from the MCP specification.

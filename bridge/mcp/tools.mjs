@@ -16,7 +16,7 @@ const POLL_MS = 400;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export const SERVER_INSTRUCTIONS = [
-  'wshell is a terminal-multiplexer command runner the user can watch: each command runs in a terminal ("pane") on the user\'s computer, backed by Zellij, and the user can follow, scroll, and take over every pane live from the wshell dashboard.',
+  'Zellij Deck is a terminal-multiplexer command runner the user can watch: each command runs in a terminal ("pane") on the user\'s computer, backed by Zellij, and the user can follow, scroll, and take over every pane live from the Zellij Deck dashboard.',
   'When to use it: prefer panes for blocking or long-running work (dev servers, watchers, long builds and test suites, anything likely to take more than about 60 seconds), and for REPLs and TUIs, so the user can see progress and step in. Simple shell commands that finish in a few seconds (ls, git status, cat, grep, short scripts) do not need a pane; run them with your usual shell tool.',
   'Each pane runs in its own full-size tab, so there are no splits or layouts to manage.',
   'Isolation: your MCP session (Mcp-Session-Id) has its own set of panes. The user\'s sessions and other agents\' panes are invisible to you.',
@@ -168,7 +168,8 @@ export function createTools({ store, zellij }) {
       const shell = await zellij.create(name, { cols: SESSION_COLS, rows: SESSION_ROWS });
       const initial = Number(/\d+/.exec(shell)?.[0]);
       store.update(name, { panes: [initial] });
-      return { session: name, initial };
+      const initialTabs = (await zellij.tabs(name)).map(tab => tab.tab_id);
+      return { session: name, initial, initialTabs };
     } catch (error) {
       store.release(name);
       throw new ToolError(error.message);
@@ -178,7 +179,7 @@ export function createTools({ store, zellij }) {
   const tools = [
     {
       name: 'pane_open',
-      description: 'Open a new pane, a shell in its own full-size tab that the user can watch live in the wshell dashboard. Prefer it for blocking or long-running commands (dev servers, watchers, long builds or test runs, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so the user can see progress and step in; simple commands that finish in a few seconds do not need a pane. With command, that command line is typed into the shell and run immediately (in the shell\'s own syntax: PowerShell on Windows), so when the program finishes the pane is back at an idle prompt and stays usable; it never freezes on a finished program. A program that never ends keeps running until you stop it with pane_keys ["Ctrl c"] or close the pane. Panes report no exit code; print one if you need it (e.g. append "; echo EXIT=$?"). Your first pane_open also creates your private Zellij session. Returns the pane id for the other pane_* tools, and, with command, the offset to pass to pane_read.',
+      description: 'Open a new pane, a shell in its own full-size tab that the user can watch live in the Zellij Deck dashboard. Prefer it for blocking or long-running commands (dev servers, watchers, long builds or test runs, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so the user can see progress and step in; simple commands that finish in a few seconds do not need a pane. With command, that command line is typed into the shell and run immediately (in the shell\'s own syntax: PowerShell on Windows), so when the program finishes the pane is back at an idle prompt and stays usable; it never freezes on a finished program. A program that never ends keeps running until you stop it with pane_keys ["Ctrl c"] or close the pane. Panes report no exit code; print one if you need it (e.g. append "; echo EXIT=$?"). Your first pane_open also creates your private Zellij session. Returns the pane id for the other pane_* tools, and, with command, the offset to pass to pane_read.',
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         command: { type: 'string', description: 'Command line to run in the new shell, e.g. "npm run dev". Omit for an idle shell.' },
@@ -214,7 +215,18 @@ export function createTools({ store, zellij }) {
             const known = (store.ownership(session)?.panes ?? []).filter(item => item !== created?.initial);
             store.update(session, { panes: [...known, opened] });
             // A new session starts with a default shell tab; the requested pane replaces it.
-            if (created) await zellij.action(session, ['close-pane', '--pane-id', `terminal_${created.initial}`]);
+            if (created) {
+              await zellij.action(session, ['close-pane', '--pane-id', `terminal_${created.initial}`]);
+              // Closing the shell returns before Zellij has removed its tab and plugins.
+              // Wait for the actual tab IDs to disappear, rather than a fixed delay or title.
+              const deadline = Date.now() + 4000;
+              for (;;) {
+                const tabs = await zellij.tabs(session);
+                if (!tabs.some(tab => created.initialTabs.includes(tab.tab_id))) break;
+                if (Date.now() >= deadline) throw new Error('Zellij did not remove the default tab after closing its pane within 4 seconds.');
+                await sleep(100);
+              }
+            }
             return opened;
           });
         } catch (error) {

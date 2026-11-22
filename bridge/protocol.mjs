@@ -63,31 +63,10 @@ export function parseClientMessage(text) {
   throw new Error('Unsupported message.');
 }
 
-// 'shell' and 'bare' are lag-diagnosis modes: a plain shell with no Zellij at all, and Zellij
-// started from an empty config with a single bare pane (no plugins, keybindings or themes).
-export const OPEN_MODES = ['watch', 'attach', 'create', 'shell', 'bare'];
+export const OPEN_MODES = ['watch', 'attach', 'create'];
 
-export function bareConfig(layoutDir) {
-  const dir = String(layoutDir).replaceAll(String.fromCharCode(92), '/').replaceAll('"', '');
-  return ['show_startup_tips false', 'show_release_notes false', 'session_serialization false', 'pane_frames false',
-    'default_layout "bare"', `layout_dir "${dir}"`, ''].join('\n');
-}
-export const BARE_LAYOUT = 'layout {\n    pane\n}\n';
-
-/** Candidate shells: pwsh, then Windows PowerShell, on Windows; the user's login shell elsewhere. */
-export function shellCandidates({ platform = process.platform, env = process.env } = {}) {
-  if (platform !== 'win32') return [env.SHELL || '/bin/sh'];
-  const dirs = (env.PATH || env.Path || '').split(';').filter(Boolean).map(d => d.replace(/^"|"$/g, ''));
-  return ['pwsh.exe', 'powershell.exe'].flatMap(name => dirs.map(d => `${d}/${name}`));
-}
-export function shellArgs(file) { return /(?:pwsh|powershell)(?:\.exe)?$/i.test(file) ? ['-NoLogo'] : []; }
-
-export function launchArgs({ mode, session }, { bareConfigPath } = {}) {
+export function launchArgs({ mode, session }) {
   if (!validSession(session)) throw new Error('Invalid session name.');
-  if (mode === 'bare') {
-    if (!bareConfigPath) throw new Error('Bare Zellij configuration is unavailable.');
-    return ['--config', bareConfigPath, 'attach', '--create', session];
-  }
   if (mode === 'watch') return ['watch', session];
   if (mode === 'create') return ['attach', '--create', session];
   if (mode === 'attach') return ['attach', session];

@@ -1,6 +1,5 @@
-/** `shell` is a plain PowerShell and `bare` an empty-config Zellij; both exist to diagnose lag. */
-export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' | 'shell' | 'bare' };
-const baseMode = (mode: WindowTarget['mode']) => (mode === 'watch' || mode === 'shell' || mode === 'bare' ? mode : 'attach');
+export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' };
+const baseMode = (mode: WindowTarget['mode']) => (mode === 'watch' ? mode : 'attach');
 const WINDOW_SIZE = { width: 1100, height: 760 };
 /**
  * A window attaches to an existing session and never creates one implicitly. Only an explicit
@@ -22,7 +21,7 @@ export function windowTarget(hash: string): WindowTarget | undefined {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const session = params.get('session') || '';
   const mode = params.get('mode');
-  if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach' && mode !== 'shell' && mode !== 'bare')) return;
+  if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach')) return;
   if (mode === 'attach' && params.get('new') === '1') return { session, mode: 'create' };
   return { session, mode };
 }

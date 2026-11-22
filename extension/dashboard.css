@@ -90,7 +90,6 @@ dialog[open] { display:flex; flex-direction:column; }
 .primary { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:650; }
 .danger,.error { color:var(--danger); }
 .launcher { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:18px 24px; border-bottom:1px solid var(--border); background:var(--surface); }
-.launcher-test { grid-column:1 / -1; }
 .launcher label { display:block; font-weight:600; margin-bottom:8px; }
 .session-row { display:flex; gap:8px; align-items:center; }
 .session-row select:first-child,.session-row input { flex:1; min-width:0; }

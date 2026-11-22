@@ -128,7 +128,7 @@ test('toolbar dashboard entry focuses an existing tab or creates one without sid
     await openDashboard();
     assert.deepEqual(events, [['tab', 12, { active: true }], ['window', 7, { focused: true }]]);
     const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
-    assert.equal(manifest.name, 'wshell');
+    assert.equal(manifest.name, 'Zellij Deck');
     assert.equal(manifest.side_panel, undefined);
     assert.equal(manifest.permissions.includes('sidePanel'), false);
   } finally {

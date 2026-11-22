@@ -1,8 +1,10 @@
 import http from 'node:http';
+import { bridgeHost, validBridgeHost } from './network.mjs';
+import { setting } from './env.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveZellij, bridgePaths, projectRoot } from './platform.mjs';
 import { McpSessionStore, DEFAULT_TTL_MS } from './mcp/store.mjs';
@@ -16,32 +18,21 @@ import * as pty from 'node-pty';
 import {
   MAX_MESSAGE_BYTES, MAX_BUFFER_BYTES, validToken, isExtensionOrigin,
   parseClientMessage, parseSessions, noSessions, launchArgs, terminalEnv,
-  bareConfig, BARE_LAYOUT, shellCandidates, shellArgs,
   snapshotRoute, snapshotArgs, snapshotLayout, sanitizeDump, snapshotFailure,
 } from './protocol.mjs';
 
 await preparePty();
 const exec = promisify(execFile);
-const host = '127.0.0.1';
-const port = Number(process.env.WEBSHELL_PORT || 17329);
-if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('WEBSHELL_PORT must be between 1024 and 65535.');
+const host = bridgeHost(process.argv.slice(2));
+const port = Number(setting(process.env, 'PORT') || 17329);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('ZELLIJ_DECK_PORT must be between 1024 and 65535.');
 // An absolute path works with both Windows ConPTY and macOS Unix PTYs.
 const executable = await resolveZellij();
 const { stateDir, cwd } = bridgePaths();
 if (!(await stat(cwd)).isDirectory()) throw new Error(`Terminal working directory is not a directory: ${cwd}`);
 await mkdir(stateDir, { recursive: true, mode: 0o700 });
-// Lag-diagnosis modes: an empty Zellij config (no plugins/keybindings) and a bare layout.
-const bareDir = path.join(stateDir, 'bare');
-const bareConfigPath = path.join(bareDir, 'config.kdl');
-await mkdir(path.join(bareDir, 'layouts'), { recursive: true, mode: 0o700 });
-await writeFile(path.join(bareDir, 'layouts', 'bare.kdl'), BARE_LAYOUT);
-await writeFile(bareConfigPath, bareConfig(path.join(bareDir, 'layouts')));
-let shellFile;
-for (const candidate of shellCandidates()) {
-  try { if ((await stat(candidate)).isFile()) { shellFile = candidate; break; } } catch {}
-}
 const tokenPath = path.join(stateDir, 'token');
-let token = process.env.WEBSHELL_TOKEN;
+let token = setting(process.env, 'TOKEN');
 if (!token) {
   try { token = (await readFile(tokenPath, 'utf8')).trim(); }
   catch (error) {
@@ -60,13 +51,13 @@ if (!token) {
 if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token || '')) throw new Error('Pairing token must contain 32–256 letters, numbers, underscores, or hyphens.');
 const env = terminalEnv();
 const version = await exec(executable, ['--version'], { env, timeout: 5000, windowsHide: true });
-// Optional pin: one or more comma-separated extension IDs (e.g. wshell and TabManager).
-const allowedExtensions = (process.env.WEBSHELL_EXTENSION_ID || '').split(',').map(id => id.trim()).filter(Boolean);
-if (allowedExtensions.some(id => !/^[a-p]{32}$/.test(id))) throw new Error('Invalid WEBSHELL_EXTENSION_ID.');
+// Optional pin: one or more comma-separated extension IDs (e.g. Zellij Deck and TabManager).
+const allowedExtensions = (setting(process.env, 'EXTENSION_ID') || '').split(',').map(id => id.trim()).filter(Boolean);
+if (allowedExtensions.some(id => !/^[a-p]{32}$/.test(id))) throw new Error('Invalid ZELLIJ_DECK_EXTENSION_ID.');
 function originAllowed(origin) {
   return isExtensionOrigin(origin) && (!allowedExtensions.length || allowedExtensions.includes(origin.slice('chrome-extension://'.length)));
 }
-function validHost(req) { return req.headers.host === `${host}:${port}`; }
+function validHost(req) { return validBridgeHost(req, host, port); }
 function httpOrigin(req) {
   // Privileged extension fetches can omit Origin. Require an explicit extension
   // identity in that case; never use it to override a supplied, hostile Origin.
@@ -115,8 +106,8 @@ function json(res, status, body) {
 }
 
 // ---- MCP (Streamable HTTP) -----------------------------------------------------
-const ttlHours = Number(process.env.WEBSHELL_MCP_TTL_HOURS || DEFAULT_TTL_MS / 3_600_000);
-if (!Number.isFinite(ttlHours) || ttlHours < 1 || ttlHours > 720) throw new Error('WEBSHELL_MCP_TTL_HOURS must be between 1 and 720.');
+const ttlHours = Number(setting(process.env, 'MCP_TTL_HOURS') || DEFAULT_TTL_MS / 3_600_000);
+if (!Number.isFinite(ttlHours) || ttlHours < 1 || ttlHours > 720) throw new Error('ZELLIJ_DECK_MCP_TTL_HOURS must be between 1 and 720.');
 const packageVersion = JSON.parse(await readFile(path.join(projectRoot, 'package.json'), 'utf8')).version;
 const mcpStore = new McpSessionStore({ file: path.join(stateDir, 'mcp-sessions.json'), token, ttlMs: ttlHours * 3_600_000 });
 await mcpStore.load();
@@ -127,7 +118,7 @@ const zellijClient = new ZellijClient({
 const mcp = createMcpHandler({
   store: mcpStore,
   tools: createTools({ store: mcpStore, zellij: zellijClient }),
-  serverInfo: { name: 'wshell', title: 'wshell terminals', version: packageVersion },
+  serverInfo: { name: 'zellij-deck', title: 'Zellij Deck terminals', version: packageVersion },
 });
 function handleMcp(req, res) {
   if (!validHost(req)) return json(res, 403, { error: 'Invalid Host header.' });
@@ -256,10 +247,7 @@ wss.on('connection', ws => {
         if (terminal) throw new Error('A session is already open.');
         clearTimeout(openTimeout);
         mode = message.mode;
-        // 'shell' runs a plain shell with no Zellij at all, to compare against Zellij sessions.
-        if (mode === 'shell' && !shellFile) throw new Error('No PowerShell or shell found on PATH.');
-        const [file, args] = mode === 'shell' ? [shellFile, shellArgs(shellFile)] : [executable, launchArgs(message, { bareConfigPath })];
-        terminal = pty.spawn(file, args, {
+        terminal = pty.spawn(executable, launchArgs(message), {
           name: 'xterm-256color', cols: message.cols, rows: message.rows,
           cwd, env,
         });
@@ -288,12 +276,11 @@ server.on('error', error => {
   process.exitCode = 1;
 });
 server.listen(port, host, () => {
-  console.log(`\nwshell bridge — ${version.stdout.trim()}`);
+  console.log(`\nZellij Deck bridge — ${version.stdout.trim()}`);
   console.log(`Platform: ${process.platform}/${process.arch}`);
   console.log(`Zellij: ${executable}`);
-  console.log(`Shell for the plain-shell test: ${shellFile || 'not found'}`);
   console.log(`State directory: ${stateDir}`);
-  console.log(`Listening only on http://${host}:${port}`);
+  console.log(`Listening on http://${host}:${port}`);
   console.log(`Pairing token: ${token}`);
   console.log('Paste this token into the extension settings. Do not share it.');
   console.log(`MCP endpoint: http://${host}:${port}/mcp (Authorization: Bearer <token>; idle MCP sessions expire after ${ttlHours}h)`);

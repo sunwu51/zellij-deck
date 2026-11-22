@@ -28,7 +28,7 @@ const configPath = path.join(stateDir, 'integration.kdl');
 await writeFile(configPath, 'session_serialization true\nserialization_interval 1\ndisable_session_metadata false\n');
 const testEnv = { ...process.env, ZELLIJ_CONFIG_FILE: configPath };
 const bridge = spawn(process.execPath, ['bridge/server.mjs'], {
-  env: { ...testEnv, WEBSHELL_PORT: String(port), WEBSHELL_TOKEN: token, WEBSHELL_STATE_DIR: stateDir },
+  env: { ...testEnv, ZELLIJ_DECK_PORT: String(port), ZELLIJ_DECK_TOKEN: token, ZELLIJ_DECK_STATE_DIR: stateDir },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let logs = '';
@@ -81,7 +81,7 @@ async function connect(mode, sessionName = session) {
   return { ws, output: () => output, failure: () => failure };
 }
 try {
-  await waitFor(() => logs.includes('Listening only'), 'bridge startup');
+  await waitFor(() => logs.includes('Listening on http://'), 'bridge startup');
   assert.equal((await request('/health')).status, 401);
   assert.equal((await request('/health', { Authorization: 'Bearer wrong' })).status, 401);
   assert.equal((await request('/health', { Origin: 'https://example.com', Authorization: `Bearer ${token}` })).status, 403);

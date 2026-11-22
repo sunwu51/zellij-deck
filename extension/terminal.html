@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>wshell</title>
+  <title>Zellij Deck</title>
   <link rel="stylesheet" href="terminal.css">
 </head>
 <body>
   <header id="header" class="header">
-    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>wshell</h1><span class="subtitle">YOUR LOCAL TERMINAL</span></div></div>
+    <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Zellij Deck</h1><span class="subtitle">YOUR LOCAL TERMINAL</span></div></div>
     <div id="header-actions" class="header-actions"><button id="dashboard" class="icon-button" aria-label="Open session previews" title="Session previews">▦</button><button id="fullscreen" class="icon-button" aria-label="Enter fullscreen" aria-pressed="false" title="Fullscreen">⛶</button><button id="popout" class="icon-button" aria-label="Open terminal in a separate window" title="Pop out terminal">↗</button><button id="settings-toggle" class="icon-button" aria-label="Toggle settings" aria-expanded="false" title="Settings">⚙</button></div>
   </header>
   <section id="settings" class="settings" hidden aria-label="Bridge settings">
@@ -28,6 +28,7 @@
       <p id="theme-feedback" class="hint" role="status" aria-live="polite"></p>
     </section>
     <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
+    <label for="host">Bridge IP</label><input id="host" type="text" value="127.0.0.1" spellcheck="false" autocomplete="off">
     <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
     <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
     <div class="settings-row"><label for="font-size">Font size</label><input id="font-size" type="number" min="10" max="24" value="16"></div>

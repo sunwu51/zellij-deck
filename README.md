@@ -1,43 +1,36 @@
-# wshell
+# Zellij Deck
 
 A Chrome extension for managing local Zellij sessions from a dashboard, with live previews and dedicated terminal windows. It uses xterm.js, a loopback-only Node.js WebSocket bridge, and your existing Zellij installation.
 
 ## Quick start (Windows and macOS)
 
-Requirements: Node.js 22 or newer, Chrome 116 or newer, and a native Zellij installation. Read-only monitoring requires a Zellij version that supports `zellij watch`. The same extension build runs on both operating systems; install bridge dependencies separately on each machine, because node-pty contains platform-specific native binaries.
+Requirements: Node.js 22 or newer, Chrome 116 or newer, and a native Zellij installation (`brew install zellij` on macOS). Read-only monitoring requires a Zellij version that supports `zellij watch`.
 
-### macOS (Apple Silicon or Intel)
+1. Start the bridge. No clone or build is needed:
 
-Install Node.js and Zellij with Homebrew, if they are not installed:
+   ```sh
+   npx -y zellij-deck
+   ```
+
+   It prints its port and a pairing token (stored in `~/.zellij-deck/token`, so it stays the same across restarts). Keep this terminal running. Use `--port` / `--host` to change the listener; see [Configuration](#configuration).
+2. Install **Zellij Deck** from the Chrome Web Store, pin it, and click its toolbar icon to open the dashboard. Clicking again focuses the existing dashboard tab. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
+3. Open **Settings** at the top of the dashboard, paste the pairing token, and click **Save & connect bridge**. The default port is **17329**. This loads sessions without attaching a terminal.
+4. Use the dashboard's top controls or a session card to **Watch** (read-only) or **Interact** in a dedicated terminal window.
+5. To create a workspace, enter a name in **Create a session** and click **Create & open**.
+6. Use **Delete** on a running card, enlarged preview, or exited-session entry to permanently remove a session. Confirm **Kill & delete** to stop all its processes and remove its saved/resurrection state. This cannot be undone. Closing a terminal window or clicking **Detach** does not delete it.
+
+The bridge searches PATH, `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.cargo/bin` for Zellij on macOS, and PATH and `%LOCALAPPDATA%\Zellij\zellij.exe` on Windows. Launch it as the same OS user that owns your Zellij sessions. WSL sessions are separate from native Windows sessions and are not automatically bridged. node-pty ships prebuilt binaries for macOS and Windows; on Linux (or if a prebuild is missing) a C++ toolchain is needed (on macOS, `xcode-select --install`).
+
+### Build from source
 
 ```sh
-brew install node@24 zellij
-export PATH="$(brew --prefix node@24)/bin:$PATH"
-```
-
-If node-pty needs to compile from source, install Apple's Command Line Tools (`xcode-select --install`) first. Then clone this repository, enter its directory, and follow the commands below. The bridge searches PATH, `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.cargo/bin` for Zellij. Launch the bridge from Terminal/iTerm using the same macOS user as your existing Zellij sessions.
-
-### Windows
-
-Install Node.js and native Windows Zellij. The bridge searches PATH and `%LOCALAPPDATA%\\Zellij\\zellij.exe`. WSL sessions are separate from native Windows sessions and are not automatically bridged.
-
-### Both platforms
-
-```powershell
+git clone https://github.com/sunwu51/webshell.git && cd webshell
 npm install
 npm run build
 npm run bridge
 ```
 
-The bridge prints its port and pairing token. Keep this terminal running.
-
-1. Open `chrome://extensions` and enable **Developer mode**.
-2. Click **Load unpacked** and choose this project's **dist** folder.
-3. Pin **wshell**, then click its toolbar icon to open the dashboard. Clicking again focuses the existing dashboard tab. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
-4. Open **Settings** at the top of the dashboard, paste the bridge's pairing token, and click **Save & connect bridge**. The default port is **17329**. This loads sessions without attaching a terminal.
-5. Use the dashboard's top controls or a session card to **Watch** (read-only) or **Interact** in a dedicated terminal window.
-6. To create a workspace, enter a name in **Create a session** and click **Create & open**.
-7. Use **Delete** on a running card, enlarged preview, or exited-session entry to permanently remove a session. Confirm **Kill & delete** to stop all its processes and remove its saved/resurrection state. This cannot be undone. Closing a terminal window or clicking **Detach** does not delete it.
+Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and choose the **dist** folder.
 
 A **bridge** is the local transport service. A **session** is a persistent Zellij workspace with its own shells, panes, and tasks. Session listing uses authenticated HTTP; an opened terminal streams input/output over WebSocket. Saving bridge settings is separate from opening a workspace.
 
@@ -69,7 +62,6 @@ Click the extension icon (or **▦** in a terminal window) to open the dashboard
 - Click a tab chip to preview another tab of that session. Click the thumbnail for a large view of the whole tab; Escape closes it.
 - **Watch** / **Interact** open that session in a terminal window. **Delete** kills and permanently deletes it after confirmation. Exited sessions are listed separately, with **Resurrect** and **Delete** actions.
 - Previews refresh only when you open the dashboard, click **↻ Refresh**, delete a session, or change the bridge port or token. There is no auto-refresh: on Windows every `zellij action` query briefly stalls all attached Zellij clients (up to 1–2 s), which made typing and scrolling stutter in open terminal windows.
-- **Lag diagnostics** opens a plain PowerShell with no Zellij, or a bare Zellij session (`bare-test`) started from an empty config with a single pane and no plugins. Compare typing and scrolling there with your usual session to tell whether lag comes from the browser, Zellij, or your Zellij config.
 
 Preview capture is strictly read-only (management actions are explicit) and do not attach a Zellij client. The bridge reads layout with `zellij action list-tabs --json` / `list-panes --json` and screen text with `dump-screen --pane-id --ansi`, so capturing never changes a session's size, focus, or active tab. Before pane text leaves the bridge, it is reduced to printable text plus SGR color/style codes. At most six Zellij query processes run at once, and at most 48 panes are captured per session. Plugin panes (status bar, tab bar, sidebars) have no screen text to dump and appear as labeled placeholders. A session with no attached client is marked **DETACHED**: it is still running in the background (Zellij keeps its server process alive after the last client leaves), but no terminal window shows it. Such a session reports no active tab, so the first tab is shown. If the dashboard says the bridge is out of date, stop the bridge and run `npm run bridge` again; a bridge started before this feature cannot capture previews. Previews require a Zellij version with these actions (verified with 0.45.1); older versions show an upgrade message on the card.
 
@@ -81,9 +73,9 @@ The bridge also serves a [Model Context Protocol](https://modelcontextprotocol.i
 http://127.0.0.1:17329/mcp        Authorization: Bearer <pairing token>
 ```
 
-Claude Code example: `claude mcp add --transport http wshell http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; terminal windows and the dashboard use the same token.
+Claude Code example: `claude mcp add --transport http zellij-deck http://127.0.0.1:17329/mcp --header "Authorization: Bearer <token>"`. Restart the bridge after updating; terminal windows and the dashboard use the same token.
 
-wshell does not replace an agent's built-in shell tool. Its server instructions and the `pane_open` description tell the agent to use a pane for blocking or long-running work (dev servers, watchers, long builds and tests, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so you can watch it in the dashboard. Simple commands that finish in seconds stay with the agent's own shell tool.
+Zellij Deck does not replace an agent's built-in shell tool. Its server instructions and the `pane_open` description tell the agent to use a pane for blocking or long-running work (dev servers, watchers, long builds and tests, anything likely to take more than about 60 seconds) and for REPLs and TUIs, so you can watch it in the dashboard. Simple commands that finish in seconds stay with the agent's own shell tool.
 
 ### Isolation: one MCP session, one Zellij session
 
@@ -93,7 +85,7 @@ This prevents accidental cross-talk. It is not an OS-level boundary: every shell
 
 ### Lifetime and cleanup
 
-An MCP session lasts 24 hours from its last request (every request renews it; change with `WEBSHELL_MCP_TTL_HOURS`, 1–720). A client that never sends `DELETE` therefore cannot leak terminals: once a session is idle past the TTL, the bridge kills its Zellij sessions. `DELETE /mcp` with the session header ends it immediately. A bridge restart keeps sessions (`.bridge/mcp-sessions.json`, which stores no token) and grants a one-hour grace period, so downtime alone does not expire them. Rotating the pairing token invalidates old ids; their terminals are cleaned up one TTL later. A client that resumes with a new session id (for example `claude --resume`) can take over an abandoned terminal with `session_adopt` once its previous owner has been idle for two hours.
+An MCP session lasts 24 hours from its last request (every request renews it; change with `ZELLIJ_DECK_MCP_TTL_HOURS`, 1–720). A client that never sends `DELETE` therefore cannot leak terminals: once a session is idle past the TTL, the bridge kills its Zellij sessions. `DELETE /mcp` with the session header ends it immediately. A bridge restart keeps sessions (`.bridge/mcp-sessions.json`, which stores no token) and grants a one-hour grace period, so downtime alone does not expire them. Rotating the pairing token invalidates old ids; their terminals are cleaned up one TTL later. A client that resumes with a new session id (for example `claude --resume`) can take over an abandoned terminal with `session_adopt` once its previous owner has been idle for two hours.
 
 ### Tools
 
@@ -109,7 +101,7 @@ There are no sessions, tabs, or layouts for an agent to manage. Your MCP session
 
 Agent sessions are named `ag-<client>-xxxxxx`, so they also appear in the dashboard and can be watched or taken over from the dashboard; each agent pane is one tab to preview. `pane_read` returns the pane's whole history (scrollback plus screen), not just the last command; pass the `offset` returned by `pane_type` to read only what that input produced. `pane_wait` matches lines added since your last input, so "type, then wait" works and the typed command's own echo is not matched. Menus and approval prompts in TUIs (Claude Code, Codex) are driven by reading `pane_screen` and sending `pane_keys`. Calls return within 45 seconds because common MCP clients time out at 60 seconds; long work keeps running and is polled. Panes report no exit code; an agent that needs one prints it (for example by appending `; echo EXIT=$?`).
 
-To let TabManager connect, add its extension ID to `WEBSHELL_EXTENSION_ID` (comma-separated) if you pin origins. Native clients send no `Origin`; browser requests with any other origin are rejected, so web pages cannot reach the endpoint.
+To let TabManager connect, add its extension ID to `ZELLIJ_DECK_EXTENSION_ID` (comma-separated) if you pin origins. Native clients send no `Origin`; browser requests with any other origin are rejected, so web pages cannot reach the endpoint.
 
 ## Terminal themes and custom palettes
 
@@ -161,23 +153,36 @@ Paste uses Chrome's real clipboard paste event and xterm's bracketed-paste behav
 
 ## Configuration
 
+By default the bridge listens on `127.0.0.1`. To allow LAN connections, explicitly select this computer's LAN IPv4 address:
+
+```sh
+npm run bridge -- --host 192.168.1.10
+```
+
+The old `WEBSHELL_*` variable names are still accepted as fallbacks.
+
+Alternatively set `ZELLIJ_DECK_HOST=192.168.1.10`. The `--host` argument takes precedence. Use `npm run bridge -- --host 0.0.0.0` (or `ZELLIJ_DECK_HOST=0.0.0.0`) to listen on all IPv4 interfaces. Otherwise select a unicast IPv4 address belonging to the server computer. Clients must still enter the server’s actual IP, not `0.0.0.0`.
+
+On the client, reload the rebuilt extension, open Settings, set **Bridge IP** to that same address, and enter the bridge port and pairing token. Allow inbound TCP on that port in the server firewall if required. Native MCP clients use `http://192.168.1.10:17329/mcp` with the same bearer token. HTTP and WebSocket traffic is unencrypted; use this mode on a trusted LAN.
+
 Optional bridge environment variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `WEBSHELL_PORT` | `17329` | Loopback listening port (1024–65535). Also set this in dashboard settings. |
+| `ZELLIJ_DECK_HOST` | `127.0.0.1` | IPv4 interface or `0.0.0.0` for all interfaces; overridden by `--host`. |
+| `ZELLIJ_DECK_PORT` | `17329` | Listening port (1024–65535). Also set this in dashboard settings. |
 | `ZELLIJ_PATH` | Zellij on PATH | Absolute executable path if discovery fails. |
-| `WEBSHELL_CWD` | Your home directory | Working directory for Zellij clients/new sessions. |
-| `WEBSHELL_STATE_DIR` | This project's `.bridge` directory | Optional location for the pairing token. |
-| `WEBSHELL_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to specific installed extension IDs (comma-separated, e.g. wshell and TabManager). Recommended for a hardened local setup. |
-| `WEBSHELL_MCP_TTL_HOURS` | `24` | Idle lifetime of an MCP session before its terminals are cleaned up (1–720). |
-| `WEBSHELL_TOKEN` | Generated random token | Override the pairing token. Use 32–256 letters, numbers, underscores, or hyphens. |
+| `ZELLIJ_DECK_CWD` | Your home directory | Working directory for Zellij clients/new sessions. |
+| `ZELLIJ_DECK_STATE_DIR` | `~/.zellij-deck` | Optional location for the pairing token. |
+| `ZELLIJ_DECK_EXTENSION_ID` | Any valid Chrome extension origin with the token | Restrict access to specific installed extension IDs (comma-separated, e.g. Zellij Deck and TabManager). Recommended for a hardened local setup. |
+| `ZELLIJ_DECK_MCP_TTL_HOURS` | `24` | Idle lifetime of an MCP session before its terminals are cleaned up (1–720). |
+| `ZELLIJ_DECK_TOKEN` | Generated random token | Override the pairing token. Use 32–256 letters, numbers, underscores, or hyphens. |
 
 Example:
 
 ```powershell
 $env:ZELLIJ_PATH = "$env:LOCALAPPDATA\Zellij\zellij.exe"
-$env:WEBSHELL_EXTENSION_ID = "your-extension-id-from-chrome-extensions"
+$env:ZELLIJ_DECK_EXTENSION_ID = "your-extension-id-from-chrome-extensions"
 npm run bridge
 ```
 
@@ -189,11 +194,11 @@ macOS configuration example (normally no override is needed):
 ZELLIJ_PATH="$(command -v zellij)" npm run bridge
 ```
 
-The generated token is stored in this project's `.bridge/token`, independent of the directory from which you launch the bridge. `WEBSHELL_STATE_DIR` overrides that directory. The extension stores its copy in device-local Chrome extension storage, not Chrome Sync. Treat it as a credential: possession permits interactive shell access through the bridge. To rotate a generated token, stop the bridge, delete `.bridge/token`, restart, and pair again.
+The generated token is stored in `~/.zellij-deck/token` (or in an existing checkout-local `.bridge/` from an older version), independent of the directory from which you launch the bridge. `ZELLIJ_DECK_STATE_DIR` overrides that directory. The extension stores its copy in device-local Chrome extension storage, not Chrome Sync. Treat it as a credential: possession permits interactive shell access through the bridge. To rotate a generated token, stop the bridge, delete `.bridge/token`, restart, and pair again.
 
 The bridge uses Windows ConPTY on Windows and Unix PTYs on macOS through node-pty. Zellij discovery supports native Windows, Apple Silicon Homebrew, Intel Homebrew, and Cargo installations. Linux PATH discovery is also supported, but Linux is not currently in the CI matrix.
 
-When moving between Windows and macOS, clone the source, run `npm ci` and `npm run build` locally, and pair using the new machine's bridge token. Do not copy `.bridge/` credentials or `node_modules/`. Sessions are local to each OS/user; migration does not transfer a running Windows session to macOS. Shared client behavior applies to Terminal/iTerm on macOS in the same way as WT on Windows.
+When moving between Windows and macOS, clone the source, run `npm ci` and `npm run build` locally, and pair using the new machine's bridge token. Do not copy `~/.zellij-deck/` credentials or `node_modules/`. Sessions are local to each OS/user; migration does not transfer a running Windows session to macOS. Shared client behavior applies to Terminal/iTerm on macOS in the same way as WT on Windows.
 
 Windows native Zellij integration is tested locally. GitHub Actions runs type checks, unit tests, and builds on Windows and macOS with Node 22/24, plus a real macOS Zellij integration test using Homebrew. A configured CI job is not a passing result; check the repository's Actions tab for the actual macOS status.
 
@@ -213,7 +218,7 @@ Changing the socket directory does not move existing sessions. Keep the existing
 
 ## Security model
 
-- Binds only to `127.0.0.1`; no LAN listener, remote hosting, or arbitrary destination setting.
+- Binds to `127.0.0.1` by default; LAN listening requires an explicit IP via `--host` or `ZELLIJ_DECK_HOST`. With `0.0.0.0`, all IPv4 interfaces are enabled. The Host header must match the connection’s destination IP and bridge port.
 - Checks Host and Chrome-extension Origin headers; website and null origins are rejected. For privileged HTTP extension fetches that omit Origin, requires an explicit extension-ID header plus the pairing token. WebSocket upgrades still require a valid extension Origin.
 - Requires the pairing token for session listing and WebSocket upgrades.
 - Sends the WebSocket token as a subprotocol, not in a URL. Traffic is unencrypted loopback traffic; local debugging tools and privileged local software can inspect it.
@@ -223,7 +228,7 @@ Changing the socket directory does not move existing sessions. Keep the existing
 - Does not inject content scripts, read pages, capture browser history, or load scripts from a CDN.
 - Bundles xterm.js locally to comply with Manifest V3's remote-code restrictions.
 
-The local bridge is a shell-access service, not a multi-user security boundary. Do not expose it through a proxy or port forward. Origin checks alone do not authenticate native programs; keep the token private. The extension's localhost host permission covers all loopback HTTP ports so that the bridge port is configurable.
+The local bridge is a shell-access service, not a multi-user security boundary. Do not expose it through a proxy or port forward. Origin checks alone do not authenticate native programs; keep the token private. The extension declares HTTP host permissions and HTTP/WebSocket connection policy for configurable IP addresses and ports; its settings accept only literal unicast IPv4 addresses.
 
 ## Development and verification
 
@@ -236,7 +241,7 @@ npm run test:integration
 
 `test:integration` starts a bridge on a temporary port, verifies authentication/origin restrictions, creates a uniquely named disposable Zellij session, attaches through a native PTY, checks that detach preserves the session, and reconnects with a read-only watcher. It tests authenticated kill-and-delete for running and exited sessions, and cleans up only its own disposable sessions. It does not manipulate existing sessions.
 
-After source changes, rebuild and click **Reload** for the extension in `chrome://extensions`. Click the wshell icon to reopen the dashboard; restart the bridge to enable session deletion.
+After source changes, rebuild and click **Reload** for the extension in `chrome://extensions`. Click the Zellij Deck icon to reopen the dashboard; restart the bridge to enable session deletion.
 
 Project layout:
 

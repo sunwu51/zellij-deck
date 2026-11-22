@@ -1,6 +1,6 @@
 # Bundled terminal symbols
 
-wshell bundles the unmodified **Symbols Nerd Font Mono Regular** from Nerd Fonts **v3.4.0** as a private-use Unicode symbol fallback. Ordinary terminal text continues to use the platform's configured font stack.
+Zellij Deck bundles the unmodified **Symbols Nerd Font Mono Regular** from Nerd Fonts **v3.4.0** as a private-use Unicode symbol fallback. Ordinary terminal text continues to use the platform's configured font stack.
 
 Source: https://github.com/ryanoasis/nerd-fonts/tree/v3.4.0/patched-fonts/NerdFontsSymbolsOnly
 

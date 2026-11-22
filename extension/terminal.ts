@@ -1,3 +1,4 @@
+import { validBridgeIp } from './network';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -14,9 +15,9 @@ import {
 import { initThemeControls } from './theme-controls';
 import { initWindowControls, openDashboard, windowTarget, attachedUrl } from './window-controls';
 
-type Settings = { port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
+type Settings = { host: string; port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
-type Target = { session: string; mode: 'watch' | 'attach' | 'create' | 'shell' | 'bare' };
+type Target = { session: string; mode: 'watch' | 'attach' | 'create' };
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 // This page is only a dedicated terminal; the dashboard is the launcher.
 const settingsPanel = element('settings');
@@ -34,7 +35,7 @@ const connectButton = element<HTMLButtonElement>('connect');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const refreshButton = element<HTMLButtonElement>('refresh');
 const notice = element('notice');
-let settings: Settings = { port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
+let settings: Settings = { host: '127.0.0.1', port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
 let socket: WebSocket | undefined;
 let target: Target | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -256,7 +257,7 @@ element('dashboard').addEventListener('click', () => {
   void openDashboard().catch(error => showNotice(error instanceof Error ? error.message : 'Could not open session previews.'));
 });
 
-function baseUrl() { return `http://127.0.0.1:${settings.port}`; }
+function baseUrl() { return `http://${settings.host}:${settings.port}`; }
 async function refreshSessions(quiet = false) {
   if (!settings.token) { setSettingsOpen(true); return; }
   refreshController?.abort();
@@ -357,7 +358,7 @@ function connect(next: Target, retry = false) {
   status(`${retry ? 'Reconnecting' : 'Connecting'} · ${next.session}`, 'connecting');
   resize();
   let ws: WebSocket;
-  try { ws = new WebSocket(`ws://127.0.0.1:${settings.port}/terminal`, ['wshell-v1', `pair.${settings.token}`]); }
+  try { ws = new WebSocket(`ws://${settings.host}:${settings.port}/terminal`, ['wshell-v1', `pair.${settings.token}`]); }
   catch (error) { detach(); showNotice(String(error)); return; }
   socket = ws;
   let intentionalExit = false;
@@ -463,6 +464,8 @@ element('create-form').addEventListener('submit', event => {
   void openSession({ session: name, mode: 'create' });
 });
 element('save-settings').addEventListener('click', async () => {
+  const host = element<HTMLInputElement>('host').value.trim();
+  if (!validBridgeIp(host)) return showNotice('Enter a specific IPv4 address, such as 192.168.1.10.');
   const port = Number(portInput.value);
   const fontSize = Number(fontInput.value);
   const lineHeight = Number(lineHeightInput.value);
@@ -472,7 +475,7 @@ element('save-settings').addEventListener('click', async () => {
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return showNotice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
   if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return showNotice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   detach();
-  settings = { ...settings, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked, renderer: normalizeRenderer(rendererInput.value) };
+  settings = { ...settings, host, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked, renderer: normalizeRenderer(rendererInput.value) };
   try { await chrome.storage.local.set({ settings }); }
   catch { showNotice('Could not save settings. Please retry.'); return; }
   terminal.options.fontSize = fontSize;
@@ -495,6 +498,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const saved = changes.settings.newValue as Partial<Settings>;
     // Credentials are used on the next connection; do not drop an active session.
     settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), renderer: normalizeRenderer(saved.renderer) };
+    element<HTMLInputElement>('host').value = settings.host;
     portInput.value = String(settings.port);
     tokenInput.value = settings.token;
     fontInput.value = String(settings.fontSize);
@@ -517,6 +521,7 @@ async function init() {
       settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true, renderer: normalizeRenderer(saved.renderer) };
     }
   } catch { showNotice('Could not load saved settings.'); }
+  element<HTMLInputElement>('host').value = settings.host;
   portInput.value = String(settings.port);
   tokenInput.value = settings.token;
   fontInput.value = String(settings.fontSize);
