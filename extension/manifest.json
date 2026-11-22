@@ -3,7 +3,7 @@
   "name": "Zellij Deck",
   "version": "0.1.0",
   "description": "Manage local Zellij sessions from a dashboard, with live previews and dedicated terminal windows.",
-  "homepage_url": "https://github.com/sunwu51/webshell",
+  "homepage_url": "https://github.com/sunwu51/zellij-deck",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",

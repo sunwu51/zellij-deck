@@ -19,7 +19,7 @@ Zellij Deck turns Chrome into a control panel for the Zellij sessions already ru
 
 How it works: start the local bridge with `npx -y zellij-deck` (Node.js 22+ and Zellij required), copy the pairing token it prints into the extension settings, and open the dashboard. Everything stays on your machine; nothing is sent to any server.
 
-Setup guide and source: https://github.com/sunwu51/webshell
+Setup guide and source: https://github.com/sunwu51/zellij-deck
 
 ## Description (中文)
 Zellij Deck 把 Chrome 变成本机 Zellij 会话的控制面板。
@@ -42,7 +42,7 @@ Provide a browser dashboard and terminal windows for managing the user's own loc
 - CSP `'wasm-unsafe-eval'`: required by the bundled xterm.js addons. No remote code is loaded or evaluated.
 
 ## Data-use disclosures
-No user data is collected, sold, or transferred. Privacy policy URL: https://github.com/sunwu51/webshell/blob/master/docs/PRIVACY.md
+No user data is collected, sold, or transferred. Privacy policy URL: https://github.com/sunwu51/zellij-deck/blob/master/docs/PRIVACY.md
 
 ## Assets to capture
 - Icon 128×128: `extension/icons/icon-128.png` (uploaded inside the zip too)

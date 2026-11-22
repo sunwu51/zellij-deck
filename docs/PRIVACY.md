@@ -15,4 +15,4 @@ Zellij Deck is a Chrome extension that talks to a bridge process (`npx -y zellij
 
 **Third parties:** none receive your data. The extension bundles all of its code and fonts and loads no remote code.
 
-**Contact:** open an issue at https://github.com/sunwu51/webshell/issues
+**Contact:** open an issue at https://github.com/sunwu51/zellij-deck/issues

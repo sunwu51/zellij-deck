@@ -14,11 +14,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sunwu51/webshell.git"
+    "url": "git+https://github.com/sunwu51/zellij-deck.git"
   },
-  "homepage": "https://github.com/sunwu51/webshell#readme",
+  "homepage": "https://github.com/sunwu51/zellij-deck#readme",
   "bugs": {
-    "url": "https://github.com/sunwu51/webshell/issues"
+    "url": "https://github.com/sunwu51/zellij-deck/issues"
   },
   "type": "module",
   "bin": {

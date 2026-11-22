@@ -24,7 +24,7 @@ The bridge searches PATH, `/opt/homebrew/bin`, `/usr/local/bin`, and `~/.cargo/b
 ### Build from source
 
 ```sh
-git clone https://github.com/sunwu51/webshell.git && cd webshell
+git clone https://github.com/sunwu51/zellij-deck.git && cd zellij-deck
 npm install
 npm run build
 npm run bridge
