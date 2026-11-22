@@ -288,13 +288,22 @@ server.listen(port, host, () => {
   // Release anything that expired while the bridge was stopped (after a startup grace period).
   void mcp.sweep().catch(error => console.error(`MCP sweep failed: ${error.message}`));
 });
-function shutdown() {
+let shuttingDown = false;
+function shutdown(signal) {
+  // A second Ctrl+C never waits for anything.
+  if (shuttingDown) { console.log('Forcing exit.'); process.exit(130); }
+  shuttingDown = true;
+  console.log(`\nShutting down (${signal})… press Ctrl+C again to force quit.`);
   mcp.close();
   // Only the bridge's sizing clients exit; agent Zellij sessions keep running.
   zellijClient.shutdown();
   for (const ws of wss.clients) ws.terminate();
   wss.close();
   server.close();
+  server.closeAllConnections();
+  // Whatever still holds the event loop (a PTY child that ignores SIGHUP, a stuck zellij
+  // query) must not keep the bridge alive. Unref'd, so a clean shutdown exits immediately.
+  setTimeout(() => process.exit(0), 3000).unref();
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

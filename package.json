@@ -1,6 +1,6 @@
 {
   "name": "zellij-deck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local bridge for the Zellij Deck Chrome extension: manage, preview and attach to Zellij sessions from your browser.",
   "keywords": [
     "zellij",
