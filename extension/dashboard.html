@@ -10,7 +10,8 @@
 <body>
   <header class="header">
     <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span><div><h1>Zellij Deck</h1><span class="subtitle">LOCAL SESSIONS · LIVE PREVIEWS</span></div></div>
-    <div class="toolbar"><button id="settings-toggle" aria-expanded="false" aria-controls="settings">⚙ Settings</button>
+    <div class="toolbar"><label class="sr-only" for="connection">Connection</label><select id="connection" title="Bridge shown in this dashboard"></select>
+      <button id="settings-toggle" aria-expanded="false" aria-controls="settings">⚙ Settings</button>
       <label class="sr-only" for="filter">Filter sessions</label><input id="filter" type="search" placeholder="Filter sessions" autocomplete="off" spellcheck="false">
       <button id="refresh" title="Refresh sessions and previews" aria-label="Refresh sessions and previews">↻ Refresh</button>
     </div>
@@ -30,16 +31,26 @@
       </details>
       <p id="theme-feedback" class="hint" role="status" aria-live="polite"></p>
     </section>
-    <div class="section-heading"><h2>Local connection</h2><span class="badge">LOOPBACK ONLY</span></div>
-    <label for="host">Bridge IP</label><input id="host" type="text" value="127.0.0.1" spellcheck="false" autocomplete="off">
-    <label for="port">Bridge port</label><input id="port" type="number" min="1024" max="65535" value="17329">
-    <label for="token">Pairing token</label><input id="token" type="password" placeholder="Paste token from the bridge terminal" autocomplete="off" spellcheck="false">
+    <section class="connections" aria-labelledby="connections-heading">
+      <div class="section-heading"><h2 id="connections-heading">Connections</h2><span class="badge">DEVICE LOCAL</span></div>
+      <p class="hint">Each connection is one bridge (<code>npx -y zellij-deck</code>) on this or another machine. The dashboard shows the selected one; terminal windows you already opened stay connected to their own bridge.</p>
+      <ul id="connection-list" class="connection-list"></ul>
+      <form id="connection-form" class="connection-form" autocomplete="off">
+        <h3 id="connection-form-title">Add connection</h3>
+        <label for="conn-name">Name</label><input id="conn-name" type="text" maxlength="40" placeholder="Work laptop" spellcheck="false">
+        <label for="conn-host">Bridge IP</label><input id="conn-host" type="text" value="127.0.0.1" spellcheck="false">
+        <label for="conn-port">Bridge port</label><input id="conn-port" type="number" min="1024" max="65535" value="17329">
+        <label for="conn-token">Pairing token</label><input id="conn-token" type="password" placeholder="Paste token from the bridge terminal" spellcheck="false">
+        <p id="conn-hint" class="hint" hidden>This address is not on this computer. Traffic to the bridge is plain HTTP, so use a trusted network or an SSH tunnel.</p>
+        <div class="session-row"><button id="conn-save" type="submit" class="primary">Add &amp; use</button><button id="conn-cancel" type="button" hidden>Cancel edit</button></div>
+      </form>
+    </section>
     <div class="settings-row"><label for="font-size">Font size</label><input id="font-size" type="number" min="10" max="24" value="16"></div>
     <div class="settings-row"><label for="line-height">Line height</label><input id="line-height" type="number" min="1" max="1.6" step="0.05" value="1.2"></div>
     <div class="settings-row"><label for="renderer">Renderer</label><select id="renderer" title="WebGL draws on the GPU and keeps scrolling and full-screen redraws smooth. DOM is the fallback."><option value="webgl">WebGL (GPU)</option><option value="dom">DOM</option></select></div>
     <label class="checkbox"><input id="auto-reconnect" type="checkbox" checked> Reconnect after a connection loss</label>
-    <button id="save-settings" class="primary">Save &amp; connect bridge</button>
-    <p class="hint">Start the local bridge with <code>npm run bridge</code>. Your token is saved on this device, not synced.</p>
+    <button id="save-settings" class="primary">Save preferences</button>
+    <p class="hint">Tokens are saved on this device, not synced.</p>
   </section>
   <section class="launcher" aria-label="Session controls">
     <div class="launcher-open">

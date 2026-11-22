@@ -1,4 +1,7 @@
-export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create' };
+import { validConnectionId } from './connections';
+
+/** `connection` is the id of the bridge the window is bound to (never its token). */
+export type WindowTarget = { session: string; mode: 'watch' | 'attach' | 'create'; connection?: string };
 const baseMode = (mode: WindowTarget['mode']) => (mode === 'watch' ? mode : 'attach');
 const WINDOW_SIZE = { width: 1100, height: 760 };
 /**
@@ -6,7 +9,7 @@ const WINDOW_SIZE = { width: 1100, height: 760 };
  * "Create" (`create: true`) adds the one-time `new=1` flag; the window drops it once connected
  * (see `attachedUrl`), so reloading it never re-creates or resurrects a session.
  */
-export function popoutUrl(base: string, target?: WindowTarget, options: { create?: boolean } = {}): string {
+export function popoutUrl(base: string, target?: WindowTarget, options: { create?: boolean; connection?: string } = {}): string {
   const url = new URL(base);
   const params = new URLSearchParams({ view: 'window' });
   if (target) {
@@ -14,20 +17,29 @@ export function popoutUrl(base: string, target?: WindowTarget, options: { create
     params.set('mode', baseMode(target.mode));
     if (options.create && target.mode === 'create') params.set('new', '1');
   }
+  const connection = target?.connection ?? options.connection;
+  if (validConnectionId(connection)) params.set('conn', connection);
   url.hash = params.toString();
   return url.href;
+}
+/** The connection id a window was opened for, even when it has no session yet. */
+export function windowConnection(hash: string): string | undefined {
+  const conn = new URLSearchParams(hash.replace(/^#/, '')).get('conn');
+  return validConnectionId(conn) ? conn : undefined;
 }
 export function windowTarget(hash: string): WindowTarget | undefined {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const session = params.get('session') || '';
   const mode = params.get('mode');
   if (params.get('view') !== 'window' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$/.test(session) || (mode !== 'watch' && mode !== 'attach')) return;
-  if (mode === 'attach' && params.get('new') === '1') return { session, mode: 'create' };
-  return { session, mode };
+  const conn = params.get('conn');
+  const connection = validConnectionId(conn) ? { connection: conn } : {};
+  if (mode === 'attach' && params.get('new') === '1') return { session, mode: 'create', ...connection };
+  return { session, mode, ...connection };
 }
 /** The window's URL once its session is connected: same session and mode, never `new=1`. */
 export function attachedUrl(href: string, target: WindowTarget): string {
-  return popoutUrl(href.split('#')[0], { session: target.session, mode: baseMode(target.mode) });
+  return popoutUrl(href.split('#')[0], { session: target.session, mode: baseMode(target.mode), connection: target.connection });
 }
 /** Open a session in its own terminal window (launched from the dashboard). */
 export async function openSessionWindow(target: WindowTarget): Promise<void> {
@@ -37,7 +49,7 @@ export async function openSessionWindow(target: WindowTarget): Promise<void> {
   });
 }
 
-export function initWindowControls(getTarget: () => WindowTarget | undefined, notify: (message: string) => void, resize: () => void) {
+export function initWindowControls(getTarget: () => WindowTarget | undefined, notify: (message: string) => void, resize: () => void, getConnection?: () => string | undefined) {
   const fullscreen = document.getElementById('fullscreen') as HTMLButtonElement;
   const popout = document.getElementById('popout') as HTMLButtonElement;
   const inWindow = new URLSearchParams(location.hash.slice(1)).get('view') === 'window';
@@ -45,7 +57,7 @@ export function initWindowControls(getTarget: () => WindowTarget | undefined, no
   let busy = false;
   async function openWindow(full = false) {
     const created = await chrome.windows.create({
-      url: popoutUrl(chrome.runtime.getURL('terminal.html'), getTarget()),
+      url: popoutUrl(chrome.runtime.getURL('terminal.html'), getTarget(), { connection: getConnection?.() }),
       type: 'popup', ...WINDOW_SIZE, focused: true,
     });
     if (full && created?.id !== undefined) await chrome.windows.update(created.id, { state: 'fullscreen' });

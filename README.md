@@ -14,7 +14,7 @@ Requirements: Node.js 22 or newer, Chrome 116 or newer, and a native Zellij inst
 
    It prints its port and a pairing token (stored in `~/.zellij-deck/token`, so it stays the same across restarts). Keep this terminal running. Use `--port` / `--host` to change the listener; see [Configuration](#configuration).
 2. Install **Zellij Deck** from the Chrome Web Store, pin it, and click its toolbar icon to open the dashboard. Clicking again focuses the existing dashboard tab. The suggested shortcut is **Alt+Shift+J**; change it in `chrome://extensions/shortcuts` if Chrome reserves it.
-3. Open **Settings** at the top of the dashboard, paste the pairing token, and click **Save & connect bridge**. The default port is **17329**. This loads sessions without attaching a terminal.
+3. Open **Settings** at the top of the dashboard, fill in **Add connection** (a name, the bridge IP, port **17329** by default, and the pairing token), and click **Add & use**. This loads sessions without attaching a terminal.
 4. Use the dashboard's top controls or a session card to **Watch** (read-only) or **Interact** in a dedicated terminal window.
 5. To create a workspace, enter a name in **Create a session** and click **Create & open**.
 6. Use **Delete** on a running card, enlarged preview, or exited-session entry to permanently remove a session. Confirm **Kill & delete** to stop all its processes and remove its saved/resurrection state. This cannot be undone. Closing a terminal window or clicking **Detach** does not delete it.
@@ -35,6 +35,26 @@ Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacke
 A **bridge** is the local transport service. A **session** is a persistent Zellij workspace with its own shells, panes, and tasks. Session listing uses authenticated HTTP; an opened terminal streams input/output over WebSocket. Saving bridge settings is separate from opening a workspace.
 
 Existing sessions from the native Zellij installation on the machine running the bridge appear automatically, including exited sessions. Interactively attaching to an exited session can resurrect it; watching an exited session may fail until it has been resurrected. Session names in this MVP are restricted to 1–96 ASCII letters, numbers, dots, underscores, and hyphens, beginning with a letter or number.
+
+## Multiple connections
+
+Settings → **Connections** holds any number of bridges, for example this computer and a remote machine. Each has a name, IP, port, and its own pairing token.
+
+- The dashboard shows one connection at a time. Pick it in the toolbar's connection menu (or **Use** in Settings); the cards and session list switch to that machine's sessions. Nothing polls in the background.
+- Every terminal window is bound to the connection it was opened from and keeps its own WebSocket. Switching the dashboard, or editing or deleting a connection, never drops a window that is already open; new credentials apply the next time that window reconnects. The window header shows which connection it belongs to.
+- **Test** (and opening Settings) does one cheap status check per connection: Online, Token rejected, or Unreachable.
+- Existing single-bridge settings migrate automatically to one connection called **Local**.
+
+For a remote machine, start its bridge on a port that is not used locally and reach it directly on the LAN (`--host <its LAN IP>`) or through an SSH tunnel. The bridge only accepts requests whose `Host` header is its own address and port, so the tunnel must use the same port on both ends:
+
+```sh
+# remote machine
+npx -y zellij-deck --port 17330
+# your computer
+ssh -N -L 17330:127.0.0.1:17330 user@remote
+```
+
+Then add a connection with IP `127.0.0.1`, port `17330` and the remote bridge's token. It coexists with the local `127.0.0.1:17329`. Traffic to a bridge is plain HTTP/WebSocket, so use a trusted network or an SSH tunnel for anything that is not this computer.
 
 ## What stays running?
 
@@ -163,7 +183,7 @@ The old `WEBSHELL_*` variable names are still accepted as fallbacks.
 
 Alternatively set `ZELLIJ_DECK_HOST=192.168.1.10`. The `--host` argument takes precedence. Use `npm run bridge -- --host 0.0.0.0` (or `ZELLIJ_DECK_HOST=0.0.0.0`) to listen on all IPv4 interfaces. Otherwise select a unicast IPv4 address belonging to the server computer. Clients must still enter the server’s actual IP, not `0.0.0.0`.
 
-On the client, reload the rebuilt extension, open Settings, set **Bridge IP** to that same address, and enter the bridge port and pairing token. Allow inbound TCP on that port in the server firewall if required. Native MCP clients use `http://192.168.1.10:17329/mcp` with the same bearer token. HTTP and WebSocket traffic is unencrypted; use this mode on a trusted LAN.
+On the client, reload the rebuilt extension, open Settings, and add a connection with that same **Bridge IP**, the bridge port, and the pairing token. Allow inbound TCP on that port in the server firewall if required. Native MCP clients use `http://192.168.1.10:17329/mcp` with the same bearer token. HTTP and WebSocket traffic is unencrypted; use this mode on a trusted LAN.
 
 Optional bridge environment variables:
 

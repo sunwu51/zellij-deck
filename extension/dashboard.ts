@@ -1,4 +1,4 @@
-import { validBridgeIp } from './network';
+import { addConnection, bridgeJson, checkHealth, loadConnections, migrate, removeConnection, saveConnections, updateConnection, type Connection, type Health } from './connections';
 import { normalizeAppearance, selectedPalette, type Palette } from './theme';
 import { previewTab, relativeTime, type Snapshot } from './snapshot';
 import { composeTab, drawGrid, type Grid } from './snapshot-render';
@@ -7,7 +7,7 @@ import { initThemeControls } from './theme-controls';
 import { DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, MIN_FONT_SIZE, MAX_FONT_SIZE, MIN_LINE_HEIGHT, MAX_LINE_HEIGHT, migrateFontSize, lineHeightOrDefault } from './font';
 import { normalizeRenderer, type RendererPreference } from './renderer';
 
-type Settings = { host: string; port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
+type Settings = { fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
 type Card = {
   name: string; current: boolean;
@@ -22,7 +22,13 @@ const focusDialog = element<HTMLDialogElement>('focus');
 const focusCanvas = element<HTMLCanvasElement>('focus-canvas');
 const filterInput = element<HTMLInputElement>('filter');
 const cards = new Map<string, Card>();
-let settings: Settings = { host: '127.0.0.1', port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
+let settings: Settings = { fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, mode: 'watch', renderer: 'webgl' };
+let connections: Connection[] = [];
+let activeId = '';
+let editingId: string | undefined;
+const health = new Map<string, Health | 'checking'>();
+const connectionSelect = element<HTMLSelectElement>('connection');
+const active = () => connections.find(item => item.id === activeId);
 let palette: Palette = selectedPalette(normalizeAppearance(undefined));
 let refreshing = false;
 let refreshAgain = false;
@@ -38,20 +44,14 @@ function status(text: string, state = '') {
   element('status').textContent = text;
   element('status-dot').className = `status-dot ${state}`;
 }
-async function bridge<T>(path: string, method = 'GET'): Promise<T> {
-  const response = await fetch(`http://${settings.host}:${settings.port}${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${settings.token}`, 'X-Side-Shell-Extension': chrome.runtime.id },
-    signal: AbortSignal.timeout(10000),
-  });
-  let body: { error?: string } & T;
-  try { body = await response.json(); } catch { throw new Error(`Bridge returned ${response.status}.`); }
-  if (!response.ok) throw new Error(body.error || `Bridge returned ${response.status}.`);
-  return body;
+async function bridge<T>(path: string, method = 'GET', conn = active()): Promise<T> {
+  if (!conn) throw new Error('No connection selected.');
+  return bridgeJson<T>(conn, path, { method });
 }
 function openWindow(session: string, mode: WindowTarget['mode']) {
-  if (!settings.token) { setSettingsOpen(true); notice('Add your pairing token in Settings first.'); return; }
-  void openSessionWindow({ session, mode }).catch(error => notice(error instanceof Error ? error.message : 'Could not open the terminal window.'));
+  const conn = active();
+  if (!conn) { setSettingsOpen(true); notice('Add a connection in Settings first.'); return; }
+  void openSessionWindow({ session, mode, connection: conn.id }).catch(error => notice(error instanceof Error ? error.message : 'Could not open the terminal window.'));
 }
 function button(label: string, onClick: () => void, className = '') {
   const node = document.createElement('button');
@@ -203,12 +203,15 @@ focusDialog.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(action =>
 });
 
 async function refreshCard(card: Card) {
+  const conn = active();
   try {
-    card.snapshot = await bridge<Snapshot>(`/sessions/${encodeURIComponent(card.name)}/snapshot`);
+    card.snapshot = await bridge<Snapshot>(`/sessions/${encodeURIComponent(card.name)}/snapshot`, 'GET', conn);
     card.error = undefined;
   } catch (error) {
+    if (conn?.id !== activeId) return; // The dashboard moved to another connection meanwhile.
     card.error = error instanceof Error && error.name !== 'TimeoutError' ? error.message : 'Snapshot timed out.';
   }
+  if (conn?.id !== activeId) return;
   await renderCard(card);
   if (focused === card.name) await renderFocus();
 }
@@ -254,9 +257,10 @@ function showEmpty(title: string, detail: string) {
 
 async function refreshAll() {
   if (refreshing) { refreshAgain = true; return; }
-  if (!settings.token) {
+  const conn = active();
+  if (!conn) {
     setSettingsOpen(true);
-    showEmpty('Pair the bridge first.', 'Paste the bridge token into Settings above, then click Save & connect bridge.');
+    showEmpty('Pair the bridge first.', 'Add a connection in Settings above: the bridge address and the pairing token it printed.');
     status('Not paired');
     return;
   }
@@ -264,15 +268,17 @@ async function refreshAll() {
   element<HTMLButtonElement>('refresh').disabled = true;
   status('Refreshing…', 'connecting');
   try {
-    const health = await bridge<{ features?: string[] }>('/health');
-    if (!health.features?.includes('snapshots')) {
+    const info = await bridge<{ features?: string[] }>('/health', 'GET', conn);
+    if (conn.id !== activeId) return;
+    if (!info.features?.includes('snapshots')) {
       // The running bridge predates session previews: snapshot requests would only return "Not found."
-      throw new Error('The running bridge is out of date and cannot capture previews. Stop it (Ctrl+C in its terminal) and run npm run bridge again.');
+      throw new Error('The running bridge is out of date and cannot capture previews. Stop it (Ctrl+C in its terminal) and restart it.');
     }
-    deletionSupported = health.features.includes('session-delete');
-    const { sessions } = await bridge<{ sessions: Session[] }>('/sessions');
+    deletionSupported = info.features.includes('session-delete');
+    const { sessions } = await bridge<{ sessions: Session[] }>('/sessions', 'GET', conn);
+    if (conn.id !== activeId) return;
     const picker = element<HTMLSelectElement>('session');
-    const selected = picker.value || settings.session;
+    const selected = picker.value || conn.lastSession || "";
     picker.replaceChildren(new Option(sessions.length ? 'Choose a session' : 'No sessions yet', ''), ...sessions.map(session => new Option(`${session.name}${session.exited ? ' · exited' : ''}`, session.name)));
     if (sessions.some(session => session.name === selected)) picker.value = selected;
     notice();
@@ -296,14 +302,16 @@ async function refreshAll() {
     // Capture visible cards first; hidden (filtered) cards still refresh afterwards.
     const ordered = [...cards.values()].sort((a, b) => Number(a.root.hidden) - Number(b.root.hidden));
     await pool(ordered, 3, refreshCard);
+    if (conn.id !== activeId) return;
     const failed = [...cards.values()].filter(card => card.error).length;
     status(`${running.length} running · ${sessions.length - running.length} exited${failed ? ` · ${failed} failed` : ''}`, 'connected');
     element('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (error) {
+    if (conn.id !== activeId) return;
     status('Bridge unavailable');
     const message = error instanceof Error && error.name !== 'TimeoutError' ? error.message : 'Bridge request timed out.';
     const outdated = message.includes('out of date');
-    notice(outdated ? message : `${message} Make sure npm run bridge is running and the token matches.`);
+    notice(outdated ? message : `${message} Make sure the bridge is running and the token matches.`);
     if (outdated) { status('Bridge needs restart'); showEmpty('Restart the bridge to enable previews.', 'The bridge process was started before session previews were added.'); }
     for (const card of cards.values()) { card.error = outdated ? 'Restart the bridge to enable previews.' : 'Bridge unavailable'; void renderCard(card); }
   } finally {
@@ -314,13 +322,13 @@ async function refreshAll() {
 }
 
 function setSettingsOpen(open: boolean) {
+  const opening = open && element('settings').hidden;
   element('settings').hidden = !open;
   element('settings-toggle').setAttribute('aria-expanded', String(open));
+  // One-time status check per connection; never a timer (queries can stall Zellij clients).
+  if (opening) connections.forEach(conn => void testConnection(conn));
 }
 function fillSettings() {
-  element<HTMLInputElement>('host').value = settings.host;
-  element<HTMLInputElement>('port').value = String(settings.port);
-  element<HTMLInputElement>('token').value = settings.token;
   element<HTMLInputElement>('font-size').value = String(settings.fontSize);
   element<HTMLInputElement>('line-height').value = String(settings.lineHeight);
   element<HTMLInputElement>('auto-reconnect').checked = settings.autoReconnect;
@@ -329,23 +337,124 @@ function fillSettings() {
 }
 element('settings-toggle').addEventListener('click', () => setSettingsOpen(element('settings').hidden));
 element('save-settings').addEventListener('click', async () => {
-  const host = element<HTMLInputElement>('host').value.trim();
-  if (!validBridgeIp(host)) return notice('Enter a specific IPv4 address, such as 192.168.1.10.');
-  const port = Number(element<HTMLInputElement>('port').value);
-  const token = element<HTMLInputElement>('token').value.trim();
   const fontSize = Number(element<HTMLInputElement>('font-size').value);
   const lineHeight = Number(element<HTMLInputElement>('line-height').value);
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) return notice('Port must be between 1024 and 65535.');
-  if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return notice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
   if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) return notice(`Font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}.`);
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return notice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
-  const next = { ...settings, host, port, token, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked, renderer: normalizeRenderer(element<HTMLSelectElement>('renderer').value) };
+  const next = { ...settings, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: element<HTMLInputElement>('auto-reconnect').checked, renderer: normalizeRenderer(element<HTMLSelectElement>('renderer').value) };
   try { await chrome.storage.local.set({ settings: next }); }
   catch { notice('Could not save settings. Please retry.'); return; }
   settings = next;
   setSettingsOpen(false);
-  await refreshAll();
+  notice();
 });
+
+// ---- Connections ---------------------------------------------------------------------------
+const HEALTH_LABEL: Record<string, string> = { online: 'Online', unauthorized: 'Token rejected', offline: 'Unreachable', checking: 'Checking…' };
+const HEALTH_CLASS: Record<string, string> = { online: 'connected', unauthorized: 'connecting', offline: 'offline', checking: 'connecting' };
+async function testConnection(conn: Connection) {
+  health.set(conn.id, 'checking');
+  renderConnections();
+  health.set(conn.id, await checkHealth(conn));
+  renderConnections();
+}
+function renderConnections() {
+  connectionSelect.replaceChildren(...connections.map(conn => new Option(conn.name, conn.id)));
+  connectionSelect.value = activeId;
+  connectionSelect.hidden = !connections.length;
+  element('connection-list').replaceChildren(...connections.map(conn => {
+    const item = document.createElement('li');
+    item.classList.toggle('active', conn.id === activeId);
+    const state = health.get(conn.id);
+    const dot = document.createElement('span');
+    dot.className = `status-dot ${state ? HEALTH_CLASS[state] : ''}`;
+    dot.title = state ? HEALTH_LABEL[state] : 'Not checked';
+    const info = document.createElement('span');
+    info.className = 'conn-info';
+    info.append(document.createTextNode(conn.name), Object.assign(document.createElement('small'), { textContent: `${conn.host}:${conn.port}` }));
+    item.append(dot, info);
+    if (conn.id !== activeId) item.append(button('Use', () => { void selectConnection(conn.id); }));
+    item.append(button('Test', () => { void testConnection(conn); }), button('Edit', () => fillConnectionForm(conn)), button('Delete', () => { void deleteConnection(conn); }, 'danger'));
+    return item;
+  }));
+}
+function fillConnectionForm(conn?: Connection) {
+  editingId = conn?.id;
+  element<HTMLInputElement>('conn-name').value = conn?.name ?? '';
+  element<HTMLInputElement>('conn-host').value = conn?.host ?? '127.0.0.1';
+  element<HTMLInputElement>('conn-port').value = String(conn?.port ?? 17329);
+  element<HTMLInputElement>('conn-token').value = conn?.token ?? '';
+  element('connection-form-title').textContent = conn ? `Edit ${conn.name}` : 'Add connection';
+  element('conn-save').textContent = conn ? 'Save changes' : 'Add & use';
+  element('conn-cancel').hidden = !conn;
+  updateHostHint();
+}
+function updateHostHint() {
+  const host = element<HTMLInputElement>('conn-host').value.trim();
+  element('conn-hint').hidden = host === '127.0.0.1' || !host;
+}
+element('conn-host').addEventListener('input', updateHostHint);
+element('conn-cancel').addEventListener('click', () => fillConnectionForm());
+/** Forget everything shown for the previous connection before another one loads. */
+function resetView() {
+  for (const card of cards.values()) card.root.remove();
+  cards.clear();
+  focused = undefined;
+  if (focusDialog.open) focusDialog.close();
+  element<HTMLSelectElement>('session').replaceChildren(new Option('Choose a session', ''));
+  renderExited([]);
+  element('empty').hidden = true;
+  deletionSupported = false;
+  notice();
+}
+async function selectConnection(id: string) {
+  if (id === activeId || !connections.some(item => item.id === id)) { connectionSelect.value = activeId; return; }
+  activeId = id;
+  try { await saveConnections(connections, activeId); }
+  catch { notice('Could not save the selected connection.'); }
+  resetView();
+  renderConnections();
+  await refreshAll();
+}
+connectionSelect.addEventListener('change', () => { void selectConnection(connectionSelect.value); });
+element('connection-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const input = {
+    name: element<HTMLInputElement>('conn-name').value,
+    host: element<HTMLInputElement>('conn-host').value,
+    port: Number(element<HTMLInputElement>('conn-port').value),
+    token: element<HTMLInputElement>('conn-token').value,
+  };
+  const editing = editingId;
+  const before = active();
+  let next: Connection[];
+  try { next = editing ? updateConnection(connections, editing, input) : addConnection(connections, input); }
+  catch (error) { return notice(error instanceof Error ? error.message : 'Invalid connection.'); }
+  const nextActive = editing ? activeId : next[next.length - 1].id;
+  try { await saveConnections(next, nextActive); }
+  catch { return notice('Could not save the connection. Please retry.'); }
+  connections = next;
+  activeId = nextActive;
+  const now = active()!;
+  fillConnectionForm();
+  renderConnections();
+  void testConnection(editing ? connections.find(item => item.id === editing)! : now);
+  const changed = before?.id !== now.id || before.host !== now.host || before.port !== now.port || before.token !== now.token;
+  if (changed) { if (before?.id !== now.id) resetView(); notice(); await refreshAll(); }
+});
+async function deleteConnection(conn: Connection) {
+  if (!confirm(`Delete connection "${conn.name}"? Terminal windows already open for it keep running until you close them.`)) return;
+  const result = removeConnection(connections, activeId, conn.id);
+  try { await saveConnections(result.connections, result.active); }
+  catch { return notice('Could not delete the connection. Please retry.'); }
+  const switched = result.active !== activeId;
+  connections = result.connections;
+  activeId = result.active;
+  health.delete(conn.id);
+  if (editingId === conn.id) fillConnectionForm();
+  renderConnections();
+  if (switched) { resetView(); await refreshAll(); }
+}
 element('connect').addEventListener('click', () => {
   const session = element<HTMLSelectElement>('session').value;
   if (!session) return notice('Choose a session, or create a new one.');
@@ -363,7 +472,7 @@ let deleting: string | undefined;
 let deleteBusy = false;
 function requestDelete(name: string) {
   if (deleteBusy) return;
-  if (!deletionSupported) { notice('Restart the bridge (Ctrl+C, then npm run bridge) to enable killing and deleting sessions.'); return; }
+  if (!deletionSupported) { notice('Restart the bridge (Ctrl+C, then start it again) to enable killing and deleting sessions.'); return; }
   deleting = name;
   element('delete-description').textContent = `Kill and delete “${name}”?`;
   element('delete-error').hidden = true;
@@ -415,25 +524,40 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (focused) void renderFocus();
   }
   if (changes.settings?.newValue) {
-    const next = changes.settings.newValue as Partial<Settings>;
-    // Terminal windows save their last session on every connect; only a new bridge address
-    // or token warrants querying Zellij again.
-    const bridgeChanged = (next.host ?? settings.host) !== settings.host || next.port !== settings.port || next.token !== settings.token;
-    settings = { ...settings, ...next };
+    // Terminal windows rewrite preferences too; those never touch the connection, so no refresh.
+    settings = { ...settings, ...(changes.settings.newValue as Partial<Settings>) };
     fillSettings();
-    if (bridgeChanged) void refreshAll();
+  }
+  if (changes.connections || changes.activeConnection) {
+    const state = migrate({
+      connections: changes.connections ? changes.connections.newValue : connections,
+      activeConnection: changes.activeConnection ? changes.activeConnection.newValue : activeId,
+    });
+    const before = active();
+    connections = state.connections;
+    activeId = state.active;
+    const now = active();
+    renderConnections();
+    const changed = before?.id !== now?.id || (!!now && !!before && (before.host !== now.host || before.port !== now.port || before.token !== now.token));
+    // Edits made here already refreshed; this covers changes made from another page.
+    if (changed) { if (before?.id !== now?.id) resetView(); void refreshAll(); }
   }
 });
 
 async function init() {
   await initThemeControls();
   try {
+    const state = await loadConnections();
+    connections = state.connections;
+    activeId = state.active;
     const stored = await chrome.storage.local.get(['settings', 'appearance']);
     const saved = stored.settings as Partial<Settings> | undefined;
     if (saved && typeof saved === 'object') settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true };
     palette = selectedPalette(normalizeAppearance(stored.appearance));
   } catch { notice('Could not load saved bridge settings.'); }
   fillSettings();
+  renderConnections();
+  fillConnectionForm();
   // Powerline glyphs live in the bundled symbol font; load it before the first canvas draw.
   try { await document.fonts.load('13px "wshell Symbols"', ''); } catch {}
   await refreshAll();

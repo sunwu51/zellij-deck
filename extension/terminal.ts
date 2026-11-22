@@ -13,17 +13,16 @@ import {
   migrateFontSize, lineHeightOrDefault,
 } from './font';
 import { initThemeControls } from './theme-controls';
-import { initWindowControls, openDashboard, windowTarget, attachedUrl } from './window-controls';
+import { initWindowControls, openDashboard, windowTarget, windowConnection, attachedUrl } from './window-controls';
+import { bridgeJson, loadConnections, migrate, rememberSession, wsUrl, type Connection } from './connections';
 
-type Settings = { host: string; port: number; token: string; fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; session: string; mode: 'watch' | 'attach'; renderer: RendererPreference };
+type Settings = { fontSize: number; lineHeight: number; fontDefaultsV2: boolean; autoReconnect: boolean; mode: 'watch' | 'attach'; renderer: RendererPreference };
 type Session = { name: string; exited: boolean; current: boolean };
 type Target = { session: string; mode: 'watch' | 'attach' | 'create' };
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 // This page is only a dedicated terminal; the dashboard is the launcher.
 const settingsPanel = element('settings');
 const toggle = element<HTMLButtonElement>('settings-toggle');
-const portInput = element<HTMLInputElement>('port');
-const tokenInput = element<HTMLInputElement>('token');
 const fontInput = element<HTMLInputElement>('font-size');
 const lineHeightInput = element<HTMLInputElement>('line-height');
 const reconnectInput = element<HTMLInputElement>('auto-reconnect');
@@ -35,8 +34,10 @@ const connectButton = element<HTMLButtonElement>('connect');
 const disconnectButton = element<HTMLButtonElement>('disconnect');
 const refreshButton = element<HTMLButtonElement>('refresh');
 const notice = element('notice');
-let settings: Settings = { host: '127.0.0.1', port: 17329, token: '', fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, session: '', mode: 'watch', renderer: 'webgl' };
+let settings: Settings = { fontSize: DEFAULT_FONT_SIZE, lineHeight: DEFAULT_LINE_HEIGHT, fontDefaultsV2: true, autoReconnect: true, mode: 'watch', renderer: 'webgl' };
 let socket: WebSocket | undefined;
+// The bridge this window is bound to for its whole life; the dashboard's selection never changes it.
+let bound: Connection | undefined;
 let target: Target | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let retries = 0;
@@ -252,29 +253,28 @@ element('send-ctrl').addEventListener('click', sendSelectedCtrl);
 element('custom-ctrl').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); sendSelectedCtrl(); }
 });
-initWindowControls(() => ready ? target : undefined, showNotice, resize);
+initWindowControls(() => ready && target ? { ...target, connection: bound?.id } : undefined, showNotice, resize, () => bound?.id);
 element('dashboard').addEventListener('click', () => {
   void openDashboard().catch(error => showNotice(error instanceof Error ? error.message : 'Could not open session previews.'));
 });
 
-function baseUrl() { return `http://${settings.host}:${settings.port}`; }
+function showConnection() {
+  const label = bound ? `${bound.name} · ${bound.host}:${bound.port}` : 'No connection';
+  element('connection-label').textContent = bound ? bound.name : 'NO CONNECTION';
+  element('connection-info').textContent = label;
+  document.title = bound ? `Zellij Deck · ${bound.name}` : 'Zellij Deck';
+}
 async function refreshSessions(quiet = false) {
-  if (!settings.token) { setSettingsOpen(true); return; }
+  const conn = bound;
+  if (!conn) { showNotice('This window has no bridge connection. Add one in the dashboard.'); setSettingsOpen(true); return; }
   refreshController?.abort();
   const controller = new AbortController();
   refreshController = controller;
   const timeout = setTimeout(() => controller.abort(), 8000);
   refreshButton.disabled = true;
   try {
-    const response = await fetch(`${baseUrl()}/sessions`, {
-      headers: {
-        Authorization: `Bearer ${settings.token}`,
-        'X-Side-Shell-Extension': chrome.runtime.id,
-      }, signal: controller.signal,
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Bridge returned ${response.status}.`);
-    const selected = sessionSelect.value || target?.session || settings.session;
+    const data = await bridgeJson<{ sessions: Session[] }>(conn, '/sessions', { signal: controller.signal });
+    const selected = sessionSelect.value || target?.session || conn.lastSession || '';
     const sessions = data.sessions as Session[];
     sessionSelect.replaceChildren(new Option(sessions.length ? 'Choose a session' : 'No Zellij sessions yet', ''));
     for (const session of sessions) {
@@ -290,7 +290,7 @@ async function refreshSessions(quiet = false) {
     if (refreshController !== controller || quiet) return;
     element('session-help').textContent = 'Could not load sessions from the bridge. This is a connection error, not an empty session list.';
     showNotice(error instanceof Error && error.name !== 'AbortError'
-      ? `${error.message} Make sure npm run bridge is running and the token matches.`
+      ? `${error.message} Make sure the bridge is running and the token matches.`
       : 'Bridge request timed out. Check the bridge and retry.');
     if (!target) status('Bridge unavailable');
   } finally {
@@ -343,12 +343,11 @@ function detach() {
   status('Detached · session kept running');
 }
 function connect(next: Target, retry = false) {
-  if (!settings.token) { showNotice('Add your pairing token in settings first.'); setSettingsOpen(true); return; }
+  if (!bound) { showNotice('This window has no bridge connection. Add one in the dashboard.'); setSettingsOpen(true); return; }
   if (!retry) {
     detach();
     retries = 0;
-    settings.session = next.session;
-    void chrome.storage.local.set({ settings });
+    void rememberSession(bound.id, next.session).catch(() => {});
   }
   target = next;
   ready = false;
@@ -358,7 +357,7 @@ function connect(next: Target, retry = false) {
   status(`${retry ? 'Reconnecting' : 'Connecting'} · ${next.session}`, 'connecting');
   resize();
   let ws: WebSocket;
-  try { ws = new WebSocket(`ws://${settings.host}:${settings.port}/terminal`, ['wshell-v1', `pair.${settings.token}`]); }
+  try { ws = new WebSocket(wsUrl(bound), ['wshell-v1', `pair.${bound.token}`]); }
   catch (error) { detach(); showNotice(String(error)); return; }
   socket = ws;
   let intentionalExit = false;
@@ -464,18 +463,11 @@ element('create-form').addEventListener('submit', event => {
   void openSession({ session: name, mode: 'create' });
 });
 element('save-settings').addEventListener('click', async () => {
-  const host = element<HTMLInputElement>('host').value.trim();
-  if (!validBridgeIp(host)) return showNotice('Enter a specific IPv4 address, such as 192.168.1.10.');
-  const port = Number(portInput.value);
   const fontSize = Number(fontInput.value);
   const lineHeight = Number(lineHeightInput.value);
-  const token = tokenInput.value.trim();
-  if (!Number.isInteger(port) || port < 1024 || port > 65535) return showNotice('Port must be between 1024 and 65535.');
   if (!Number.isInteger(fontSize) || fontSize < MIN_FONT_SIZE || fontSize > MAX_FONT_SIZE) return showNotice(`Font size must be between ${MIN_FONT_SIZE} and ${MAX_FONT_SIZE}.`);
   if (!(lineHeight >= MIN_LINE_HEIGHT && lineHeight <= MAX_LINE_HEIGHT)) return showNotice(`Line height must be between ${MIN_LINE_HEIGHT} and ${MAX_LINE_HEIGHT}.`);
-  if (!/^[a-zA-Z0-9_-]{32,256}$/.test(token)) return showNotice('Paste the full pairing token printed by the bridge (32–256 letters, numbers, underscores, or hyphens).');
-  detach();
-  settings = { ...settings, host, port, fontSize, lineHeight, fontDefaultsV2: true, token, autoReconnect: reconnectInput.checked, renderer: normalizeRenderer(rendererInput.value) };
+  settings = { ...settings, fontSize, lineHeight, fontDefaultsV2: true, autoReconnect: reconnectInput.checked, renderer: normalizeRenderer(rendererInput.value) };
   try { await chrome.storage.local.set({ settings }); }
   catch { showNotice('Could not save settings. Please retry.'); return; }
   terminal.options.fontSize = fontSize;
@@ -483,7 +475,6 @@ element('save-settings').addEventListener('click', async () => {
   renderer.apply(settings.renderer);
   setSettingsOpen(false);
   resize();
-  await refreshSessions();
 });
 window.addEventListener('pagehide', detach);
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -498,9 +489,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const saved = changes.settings.newValue as Partial<Settings>;
     // Credentials are used on the next connection; do not drop an active session.
     settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), renderer: normalizeRenderer(saved.renderer) };
-    element<HTMLInputElement>('host').value = settings.host;
-    portInput.value = String(settings.port);
-    tokenInput.value = settings.token;
     fontInput.value = String(settings.fontSize);
     lineHeightInput.value = String(settings.lineHeight);
     reconnectInput.checked = settings.autoReconnect;
@@ -511,19 +499,27 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderer.apply(settings.renderer);
     resize();
   }
+  if (changes.connections && bound) {
+    // Edited credentials apply from the next (re)connect; a live session is never dropped.
+    const current = migrate({ connections: changes.connections.newValue }).connections.find(item => item.id === bound!.id);
+    if (current) { bound = current; showConnection(); }
+    else showNotice('This connection was deleted in the dashboard. The open session keeps running until you close the window.');
+  }
 });
 async function init() {
   await initThemeControls(terminal);
   try {
+    const state = await loadConnections();
+    const wanted = windowConnection(location.hash);
+    bound = wanted ? state.connections.find(item => item.id === wanted) : state.connections.find(item => item.id === state.active);
+    if (wanted && !bound) showNotice('The connection this window was opened for no longer exists. Open a session from the dashboard.');
     const stored = await chrome.storage.local.get('settings');
     if (stored.settings && typeof stored.settings === 'object') {
       const saved = stored.settings as Partial<Settings>;
       settings = { ...settings, ...saved, fontSize: migrateFontSize(saved), lineHeight: lineHeightOrDefault(saved.lineHeight), fontDefaultsV2: true, renderer: normalizeRenderer(saved.renderer) };
     }
   } catch { showNotice('Could not load saved settings.'); }
-  element<HTMLInputElement>('host').value = settings.host;
-  portInput.value = String(settings.port);
-  tokenInput.value = settings.token;
+  showConnection();
   fontInput.value = String(settings.fontSize);
   lineHeightInput.value = String(settings.lineHeight);
   reconnectInput.checked = settings.autoReconnect;
@@ -535,10 +531,9 @@ async function init() {
   resize();
   const requested = windowTarget(location.hash);
   if (requested) {
-    settings.session = requested.session;
     setMode(requested.mode === 'watch' ? 'watch' : 'attach');
   }
-  if (!settings.token) setSettingsOpen(true);
+  if (!bound) setSettingsOpen(true);
   else {
     await refreshSessions();
     if (requested) connect(requested);

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { transform } from 'esbuild';
+import { build } from 'esbuild';
 
-const source = await readFile(new URL('../extension/window-controls.ts', import.meta.url), 'utf8');
-const { code } = await transform(source, { loader: 'ts', format: 'esm' });
+// Bundled, because window-controls imports the connection-id validator from ./connections.
+const { outputFiles } = await build({ entryPoints: [new URL('../extension/window-controls.ts', import.meta.url).pathname], bundle: true, format: 'esm', write: false });
+const code = outputFiles[0].text;
 const { popoutUrl, windowTarget, initWindowControls, openDashboard } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const base = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/terminal.html';
 
@@ -134,5 +135,23 @@ test('toolbar dashboard entry focuses an existing tab or creates one without sid
   } finally {
     if (oldChrome === undefined) delete globalThis.chrome;
     else globalThis.chrome = oldChrome;
+  }
+});
+
+test('a window is bound to its connection by id only, never by token', async () => {
+  const { attachedUrl, windowConnection } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  const id = '3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab';
+  const url = popoutUrl(base, { session: 'dev', mode: 'watch', connection: id, token: 'must-not-leak' });
+  assert.deepEqual(windowTarget(new URL(url).hash), { session: 'dev', mode: 'watch', connection: id });
+  assert.ok(!url.includes('must-not-leak'));
+  assert.equal(windowConnection(new URL(url).hash), id);
+  assert.equal(windowTarget(new URL(attachedUrl(popoutUrl(base, { session: 'dev', mode: 'create', connection: id }, { create: true }), { session: 'dev', mode: 'create', connection: id })).hash).connection, id, 'reload keeps the connection');
+  // A session-less pop-out still remembers which bridge it belongs to.
+  const bare = popoutUrl(base, undefined, { connection: id });
+  assert.equal(windowTarget(new URL(bare).hash), undefined);
+  assert.equal(windowConnection(new URL(bare).hash), id);
+  for (const bad of ['', 'a b', 'x'.repeat(65), '../x', '<script>']) {
+    assert.equal(windowConnection(`#view=window&conn=${encodeURIComponent(bad)}`), undefined, bad);
+    assert.equal(windowTarget(`#view=window&session=dev&mode=watch&conn=${encodeURIComponent(bad)}`).connection, undefined, bad);
   }
 });
