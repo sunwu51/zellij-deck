@@ -1,0 +1,48 @@
+name: Release extension zip
+
+# Builds the Chrome Web Store package and attaches it to a GitHub Release
+# whenever extension/manifest.json's version has no release yet.
+on:
+  push:
+    branches: [master]
+    paths: [extension/manifest.json]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - id: version
+        run: |
+          version=$(node -p "require('./extension/manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "ext-v$version" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ext-v$version already exists; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: steps.version.outputs.exists == 'false'
+        run: npm ci
+      - if: steps.version.outputs.exists == 'false'
+        run: npm run check && npm test
+      - if: steps.version.outputs.exists == 'false'
+        run: npm run package:store
+      - if: steps.version.outputs.exists == 'false'
+        run: |
+          gh release create "ext-v${{ steps.version.outputs.version }}" \
+            "release/zellij-deck-${{ steps.version.outputs.version }}.zip" \
+            --title "Extension v${{ steps.version.outputs.version }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
