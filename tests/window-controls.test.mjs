@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
 // Bundled, because window-controls imports the connection-id validator from ./connections.
-const { outputFiles } = await build({ entryPoints: [new URL('../extension/window-controls.ts', import.meta.url).pathname], bundle: true, format: 'esm', write: false });
+const { outputFiles } = await build({ entryPoints: [fileURLToPath(new URL('../extension/window-controls.ts', import.meta.url))], bundle: true, format: 'esm', write: false });
 const code = outputFiles[0].text;
 const { popoutUrl, windowTarget, initWindowControls, openDashboard } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const base = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/terminal.html';

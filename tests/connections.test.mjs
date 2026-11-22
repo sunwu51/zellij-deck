@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
+import { fileURLToPath } from 'node:url';
 
-const { outputFiles } = await build({ entryPoints: [new URL('../extension/connections.ts', import.meta.url).pathname], bundle: true, format: 'esm', write: false });
+const { outputFiles } = await build({ entryPoints: [fileURLToPath(new URL('../extension/connections.ts', import.meta.url))], bundle: true, format: 'esm', write: false });
 const mod = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`);
 const { migrate, addConnection, updateConnection, removeConnection, validateConnection, httpBase, wsUrl, checkHealth, defaultName, loadConnections } = mod;
 
