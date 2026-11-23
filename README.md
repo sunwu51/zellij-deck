@@ -236,6 +236,25 @@ npm run bridge
 
 Changing the socket directory does not move existing sessions. Keep the existing setting when attaching to an already running session. The bridge preserves `ZELLIJ_SOCKET_DIR` and Zellij configuration variables, while clearing only nested-session identity variables.
 
+## macOS menu bar switcher
+
+Terminal windows are separate browser windows, so on macOS you can list them in the menu bar and jump to one with a click. This uses [SwiftBar](https://swiftbar.app) and AppleScript; nothing is added to the extension or the bridge.
+
+```bash
+./integrations/macos-menubar/install.sh
+```
+
+The script installs SwiftBar with Homebrew if needed, then installs a menu bar item that shows the extension icon and the number of open terminal windows. The dropdown has:
+
+- **Dashboard** — focuses the dashboard tab, or opens one if it is closed.
+- One entry per terminal window, titled `<connection> · <session>`. Click to bring that window to the front.
+
+The list refreshes every 5 seconds and whenever the menu opens. Windows are listed in the browser's own window order (most recently used first).
+
+On first use macOS asks whether SwiftBar may control your browser; choose **Allow** (System Settings → Privacy & Security → Automation).
+
+Options: `--browser "Brave Browser"` for another Chromium browser (Chrome, Brave, Edge), and `--ext-id <id>` to set the extension ID used to open a closed dashboard. By default the ID is detected from an open Zellij Deck tab, so open the dashboard once before installing. Unpacked and Chrome Web Store installs have different IDs; re-run the script if you switch. Remove everything with `./integrations/macos-menubar/install.sh --uninstall`.
+
 ## Security model
 
 - Binds to `127.0.0.1` by default; LAN listening requires an explicit IP via `--host` or `ZELLIJ_DECK_HOST`. With `0.0.0.0`, all IPv4 interfaces are enabled. The Host header must match the connection’s destination IP and bridge port.

@@ -262,7 +262,10 @@ function showConnection() {
   const label = bound ? `${bound.name} · ${bound.host}:${bound.port}` : 'No connection';
   element('connection-label').textContent = bound ? bound.name : 'NO CONNECTION';
   element('connection-info').textContent = label;
-  document.title = bound ? `Zellij Deck · ${bound.name}` : 'Zellij Deck';
+  updateTitle();
+}
+function updateTitle() {
+  document.title = ['Zellij Deck', bound?.name, target?.session].filter(Boolean).join(' · ');
 }
 async function refreshSessions(quiet = false) {
   const conn = bound;
@@ -332,6 +335,7 @@ function detach() {
   dropQueuedOutput();
   clearTimeout(retryTimer);
   target = undefined;
+  updateTitle();
   ready = false;
   const old = socket;
   socket = undefined;
@@ -350,6 +354,7 @@ function connect(next: Target, retry = false) {
     void rememberSession(bound.id, next.session).catch(() => {});
   }
   target = next;
+  updateTitle();
   ready = false;
   terminal.options.disableStdin = true;
   setBusy(true);
@@ -437,6 +442,7 @@ function connect(next: Target, retry = false) {
     } else {
       socket = undefined;
       target = undefined;
+      updateTitle();
       setBusy(false);
       status('Disconnected');
     }
